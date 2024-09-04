@@ -5,7 +5,10 @@ D0A10Ruido=Delay0Avg10.rpm;
 D0A20Ruido=Delay0Avg20.rpm;
 D0A30Ruido=Delay0Avg30.rpm;
 %RV es de Referencia Variable
-D0A0RV=Delay0Avg0refvariable.rpm;
+D0A0RVREF=Delay0Avg0refvariable.ref;
+D0A0RVRPM=Delay0Avg0refvariable.rpm;
+D0A0RV=D0A0RVRPM;
+D0A0RVTMS=mean(Delay0Avg0refvariable(:,3));
 D10A0RV=Delay10Avg0refvariable.rpm;
 D20A0RV=Delay20Avg0refvariable.rpm;
 D30A0RV=Delay30Avg0refvariable.rpm;

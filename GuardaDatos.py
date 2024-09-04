@@ -5,16 +5,16 @@ import time
 # Configure serial port
 serial_port = 'COM5'  # Replace with your serial port
 baud_rate = 57600  # Replace with your baud rate
-timeout = 1  # Timeout for serial read
+timeout = 10  # Timeout for serial read
 
 # Open serial port
 ser = serial.Serial(serial_port, baud_rate, timeout=timeout)
 
 # CSV file name
-csv_file = 'Delay 100 Avg 100 Prop.csv'
+csv_file = 'Delay 100 Avg 1 OpenLoop codigomejorado.csv'
 
-# Open CSV file in append mode
-with open(csv_file, mode='a', newline='') as file:
+# Open CSV file in append mode with UTF-8 encoding
+with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
     writer = csv.writer(file)
 
     # Infinite loop to read from serial port
