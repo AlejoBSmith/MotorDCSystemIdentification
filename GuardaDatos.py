@@ -11,7 +11,7 @@ timeout = 10  # Timeout for serial read
 ser = serial.Serial(serial_port, baud_rate, timeout=timeout)
 
 # CSV file name
-csv_file = 'Delay 5 Avg 10.csv'
+csv_file = 'MotorDC_ControlPosicion.csv'
 
 # Open CSV file in append mode with UTF-8 encoding
 with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
