@@ -19,9 +19,10 @@ int tiempo, tiempoinicio, tiempoanterior, referencia, encoderTicksActual, encode
 float tiempociclo, RPM, RPMPromedio = 0;
 
 //Variables nuevas para PID posición
-float Kp = ;
-float Ki = ;
-float T = ;
+float Kp = 0;
+float Ki = 0;
+float Kd = 0;
+float T = 0.016; //Tiempo de muestreo
 
 float error, previousError, integral, output, reference, distancia = 0;
 
@@ -87,19 +88,24 @@ void loop() {
     // Solo para control de posición
     // Aquí se escribe PWM de cero con delay para evitar frenar el motor con voltaje opuesto
     // Eso puede quemar el motor si no se considera (en motores grandes)
+    // También hay que borrar la "memoria" del término integral
+    integral = 0;
+    distancia = 0;
+    output = 0;
     analogWrite(pwmPin,0); //Solo para control de posición
     encoderTicks=0; //Solo para control de posición
     delay(1000); //Solo para control de posición
   }
 
   distancia = encoderTicks;
-  output = ;
+  error = referencia - distancia;
+
+  output = 0; //ESCRIBAN AQUÍ SU ECUACIÓN
 
   //RPM=encoderTicks/(TiempoCicloPromedio)*70; //Factor de conversión para pasar de Ticks a RPM. Esto depende de su encoder.
   //RPMPromedio=RPMAvg.reading(RPM);
   //encoderTicks=0; // Control de velocidad
   TiempoCicloPromedio=TiempoCicloAvg.reading(tiempociclo);
-  error=referencia-distancia;
 
   //Definición del controlador en Z
   x[0] = error;  // error
@@ -125,14 +131,14 @@ void loop() {
     digitalWrite(in1Pin, HIGH); //Dirección de giro A. Para más detalle, hoja de datos l298N
     digitalWrite(in2Pin, LOW);
     delay(2);
-    error=abs(error);
+    pwmOutput=abs(pwmOutput);
     analogWrite(pwmPin,pwmOutput);
   }
-  else{
+  if(error<=0){
     digitalWrite(in1Pin, LOW); //Dirección de giro -A
     digitalWrite(in2Pin, HIGH);
     delay(2);
-    error=abs(error);
+    pwmOutput=abs(pwmOutput);
     analogWrite(pwmPin,pwmOutput);
   }
   //analogWrite(pwmPin, RPMPromedio); // Este debe estar activado para los datos de para la identificación del sistema
