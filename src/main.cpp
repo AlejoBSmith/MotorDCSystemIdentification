@@ -15,8 +15,16 @@ bool inicio, a = 1;
 float controladorOUT = 0;
 float x[3] = {0};  // Input samples (u[k], u[k-1], u[k-2])
 float y[3] = {0};  // Output samples (y[k], y[k-1], y[k-2])
-int error, tiempo, tiempoinicio, tiempoanterior, referencia, encoderTicksActual, encoderTicksAnterior, TiempoCicloPromedio = 0;
+int tiempo, tiempoinicio, tiempoanterior, referencia, encoderTicksActual, encoderTicksAnterior, TiempoCicloPromedio = 0;
 float tiempociclo, RPM, RPMPromedio = 0;
+
+//Variables nuevas para PID posición
+float Kp = ;
+float Ki = ;
+float T = ;
+
+float error, previousError, integral, output, reference, distancia = 0;
+
 String DatoSerial;
 
 // IDENTIFICACIÓN DE SISTEMA
@@ -65,22 +73,33 @@ void setup() {
 
 void loop() {
   if(a==0){  //Genera referencias variables para entrenamiento red neuronal
-    referencia=random(70,180); // Deben operar el motor en su zona lineal! Las FT son lineales
+    // Solo debe haber UNA referencia activa
+    //referencia=random(70,180); // Deben operar el motor en su zona lineal! Las FT son lineales
+    referencia=random(-2500,2500); // Referencias para desplazamientos en control de posición
     tiempoinicio=millis();
     a=1;
   }
   tiempoanterior=tiempo;
   tiempo=millis();
   tiempociclo=tiempo-tiempoanterior;
-  if((tiempo-tiempoinicio>=3000) && a==1){ //mantiene la referencia por este tiempo
+  if((tiempo-tiempoinicio>=5000) && a==1){ //mantiene la referencia por este tiempo
     a=0;
+    // Solo para control de posición
+    // Aquí se escribe PWM de cero con delay para evitar frenar el motor con voltaje opuesto
+    // Eso puede quemar el motor si no se considera (en motores grandes)
+    analogWrite(pwmPin,0); //Solo para control de posición
+    encoderTicks=0; //Solo para control de posición
+    delay(1000); //Solo para control de posición
   }
 
-  RPM=encoderTicks/(TiempoCicloPromedio)*70; //Factor de conversión para pasar de Ticks a RPM. Esto depende de su encoder.
-  RPMPromedio=RPMAvg.reading(RPM);
-  encoderTicks=0;
+  distancia = encoderTicks;
+  output = ;
+
+  //RPM=encoderTicks/(TiempoCicloPromedio)*70; //Factor de conversión para pasar de Ticks a RPM. Esto depende de su encoder.
+  //RPMPromedio=RPMAvg.reading(RPM);
+  //encoderTicks=0; // Control de velocidad
   TiempoCicloPromedio=TiempoCicloAvg.reading(tiempociclo);
-  error=referencia-RPMPromedio;
+  error=referencia-distancia;
 
   //Definición del controlador en Z
   x[0] = error;  // error
@@ -100,12 +119,27 @@ void loop() {
   y[1] = controladorOUT;   // y[k-1] = y[k]
 
   // Solo debe haber UNO activado!
-  analogWrite(pwmPin, controladorOUT); // Este debe estar activado si quieren usar el controlador
-  //analogWrite(pwmPin, referencia); // Este debe estar activado para los datos de para la identificación del sistema
+  //analogWrite(pwmPin, controladorOUT); // Este debe estar activado si quieren usar el controlador
+  int pwmOutput = constrain(output, -255, 255);  // Para considerar valores positivos y negativos
+  if(error>=0){
+    digitalWrite(in1Pin, HIGH); //Dirección de giro A. Para más detalle, hoja de datos l298N
+    digitalWrite(in2Pin, LOW);
+    delay(2);
+    error=abs(error);
+    analogWrite(pwmPin,pwmOutput);
+  }
+  else{
+    digitalWrite(in1Pin, LOW); //Dirección de giro -A
+    digitalWrite(in2Pin, HIGH);
+    delay(2);
+    error=abs(error);
+    analogWrite(pwmPin,pwmOutput);
+  }
+  //analogWrite(pwmPin, RPMPromedio); // Este debe estar activado para los datos de para la identificación del sistema
 
   Serial.print(referencia);
   Serial.print(" ");
-  Serial.print(int(RPMPromedio));
+  Serial.print(distancia);
   Serial.print(" ");
   Serial.println(TiempoCicloPromedio);
   delay(delayintencional);
