@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>937</width>
+    <width>1100</width>
     <height>500</height>
    </rect>
   </property>
@@ -83,7 +83,7 @@
     <rect>
      <x>210</x>
      <y>30</y>
-     <width>321</width>
+     <width>371</width>
      <height>181</height>
     </rect>
    </property>
@@ -121,7 +121,7 @@
     <rect>
      <x>210</x>
      <y>230</y>
-     <width>321</width>
+     <width>371</width>
      <height>181</height>
     </rect>
    </property>
@@ -212,7 +212,7 @@
   <widget class="QComboBox" name="modooperacion">
    <property name="geometry">
     <rect>
-     <x>550</x>
+     <x>600</x>
      <y>40</y>
      <width>131</width>
      <height>22</height>
@@ -252,7 +252,7 @@
   <widget class="QLabel" name="modooperacion_label">
    <property name="geometry">
     <rect>
-     <x>550</x>
+     <x>600</x>
      <y>10</y>
      <width>141</width>
      <height>31</height>
@@ -354,9 +354,9 @@
   <widget class="QTabWidget" name="tabWidget">
    <property name="geometry">
     <rect>
-     <x>540</x>
+     <x>600</x>
      <y>70</y>
-     <width>381</width>
+     <width>491</width>
      <height>341</height>
     </rect>
    </property>
@@ -378,7 +378,7 @@
       <rect>
        <x>10</x>
        <y>10</y>
-       <width>201</width>
+       <width>261</width>
        <height>31</height>
       </rect>
      </property>
@@ -391,88 +391,306 @@
       <rect>
        <x>10</x>
        <y>50</y>
-       <width>201</width>
-       <height>251</height>
-      </rect>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="spinBox">
-     <property name="geometry">
-      <rect>
-       <x>230</x>
-       <y>40</y>
-       <width>51</width>
-       <height>22</height>
-      </rect>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="spinBox_2">
-     <property name="geometry">
-      <rect>
-       <x>290</x>
-       <y>40</y>
-       <width>51</width>
-       <height>21</height>
+       <width>261</width>
+       <height>121</height>
       </rect>
      </property>
     </widget>
     <widget class="QLabel" name="modooperacion_label_3">
      <property name="geometry">
       <rect>
-       <x>230</x>
+       <x>270</x>
        <y>10</y>
-       <width>121</width>
-       <height>31</height>
+       <width>191</width>
+       <height>51</height>
       </rect>
      </property>
      <property name="text">
-      <string>X lag            Y lag</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Numerator / denominator order&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
-    <widget class="QSpinBox" name="spinBox_3">
+    <widget class="QWidget" name="verticalLayoutWidget_3">
      <property name="geometry">
       <rect>
-       <x>230</x>
-       <y>100</y>
+       <x>10</x>
+       <y>180</y>
+       <width>451</width>
+       <height>131</height>
+      </rect>
+     </property>
+     <layout class="QVBoxLayout" name="Layoutforced_response">
+      <item>
+       <widget class="QWidget" name="forced_response" native="true"/>
+      </item>
+     </layout>
+    </widget>
+    <widget class="QLineEdit" name="numorder">
+     <property name="geometry">
+      <rect>
+       <x>310</x>
+       <y>70</y>
        <width>51</width>
-       <height>22</height>
+       <height>21</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="denorder">
+     <property name="geometry">
+      <rect>
+       <x>370</x>
+       <y>70</y>
+       <width>51</width>
+       <height>21</height>
       </rect>
      </property>
     </widget>
     <widget class="QLabel" name="modooperacion_label_4">
      <property name="geometry">
       <rect>
-       <x>230</x>
-       <y>70</y>
-       <width>121</width>
+       <x>280</x>
+       <y>100</y>
+       <width>171</width>
        <height>31</height>
       </rect>
      </property>
      <property name="text">
-      <string>Degree</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Use identification data from:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
-    <widget class="QSpinBox" name="spinBox_4">
+    <widget class="QCheckBox" name="identdatagraph">
      <property name="geometry">
       <rect>
-       <x>290</x>
-       <y>100</y>
+       <x>310</x>
+       <y>130</y>
+       <width>111</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Graph history</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="identdatafile">
+     <property name="geometry">
+      <rect>
+       <x>310</x>
+       <y>150</y>
+       <width>91</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Saved file</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QWidget" name="tab_4">
+    <attribute name="title">
+     <string>Page</string>
+    </attribute>
+    <widget class="QLabel" name="sim_den_label">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>40</y>
        <width>51</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Den</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="sim_num_label">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>10</y>
+       <width>51</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Num</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_num1">
+     <property name="geometry">
+      <rect>
+       <x>330</x>
+       <y>20</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_den3">
+     <property name="geometry">
+      <rect>
+       <x>170</x>
+       <y>50</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_num2">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>20</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_den0">
+     <property name="geometry">
+      <rect>
+       <x>410</x>
+       <y>50</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_num3">
+     <property name="geometry">
+      <rect>
+       <x>170</x>
+       <y>20</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_num0">
+     <property name="geometry">
+      <rect>
+       <x>410</x>
+       <y>20</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_den1">
+     <property name="geometry">
+      <rect>
+       <x>330</x>
+       <y>50</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sim_den2">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>50</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="sim_tiposenal_label">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>20</y>
+       <width>111</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Signal type</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="sim_tiposenal">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>50</y>
+       <width>91</width>
        <height>22</height>
       </rect>
      </property>
+     <item>
+      <property name="text">
+       <string>Step</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Ramp</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Impulse</string>
+      </property>
+     </item>
     </widget>
-    <widget class="QLabel" name="modooperacion_label_5">
+    <widget class="QWidget" name="forced_response_2" native="true">
      <property name="geometry">
       <rect>
-       <x>290</x>
-       <y>70</y>
-       <width>121</width>
+       <x>10</x>
+       <y>80</y>
+       <width>381</width>
+       <height>231</height>
+      </rect>
+     </property>
+     <widget class="QWidget" name="verticalLayoutWidget_4">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>381</width>
+        <height>231</height>
+       </rect>
+      </property>
+      <layout class="QVBoxLayout" name="Layoutsim_response">
+       <item>
+        <widget class="QWidget" name="sim_response" native="true"/>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+    <widget class="QPushButton" name="simulation">
+     <property name="geometry">
+      <rect>
+       <x>400</x>
+       <y>130</y>
+       <width>71</width>
+       <height>111</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Simulate</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="x_scale">
+     <property name="geometry">
+      <rect>
+       <x>400</x>
+       <y>280</y>
+       <width>71</width>
+       <height>21</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="sim_num_label_2">
+     <property name="geometry">
+      <rect>
+       <x>400</x>
+       <y>250</y>
+       <width>71</width>
        <height>31</height>
       </rect>
      </property>
      <property name="text">
-      <string>Info values</string>
+      <string>Max time</string>
      </property>
     </widget>
    </widget>
@@ -615,6 +833,189 @@
      </property>
     </widget>
    </widget>
+   <widget class="QWidget" name="tab_2">
+    <attribute name="title">
+     <string>Page</string>
+    </attribute>
+    <widget class="QLabel" name="modooperacion_label_5">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>10</y>
+       <width>291</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;S-domain to Z-domain discretization&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="discretize">
+     <property name="geometry">
+      <rect>
+       <x>60</x>
+       <y>270</y>
+       <width>291</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Discretize</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="modooperacion_label_6">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>40</y>
+       <width>451</width>
+       <height>51</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Input transfer function numerator and denominator coefficients, sampling time and discretization&lt;/p&gt;&lt;p&gt;method&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="snum3">
+     <property name="geometry">
+      <rect>
+       <x>60</x>
+       <y>110</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="snum2">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>110</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="snum1">
+     <property name="geometry">
+      <rect>
+       <x>220</x>
+       <y>110</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="snum0">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>110</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sden3">
+     <property name="geometry">
+      <rect>
+       <x>60</x>
+       <y>140</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sden2">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>140</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sden1">
+     <property name="geometry">
+      <rect>
+       <x>220</x>
+       <y>140</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sden0">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>140</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="num_label">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>100</y>
+       <width>41</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Num</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="den_label">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>130</y>
+       <width>41</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Den</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="sampling_time">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>70</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="num_label_2">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>60</y>
+       <width>71</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Sampling time</string>
+     </property>
+    </widget>
+    <widget class="QTextBrowser" name="discretizationresult">
+     <property name="geometry">
+      <rect>
+       <x>60</x>
+       <y>180</y>
+       <width>291</width>
+       <height>81</height>
+      </rect>
+     </property>
+    </widget>
+   </widget>
    <widget class="QWidget" name="Digital">
     <attribute name="title">
      <string>Tab 2</string>
@@ -622,9 +1023,9 @@
     <widget class="QLabel" name="label">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>20</y>
-       <width>111</width>
+       <x>10</x>
+       <y>10</y>
+       <width>221</width>
        <height>41</height>
       </rect>
      </property>
@@ -634,7 +1035,7 @@
       </font>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Digital controller&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;coefficients&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Digital controller coefficients&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QLabel" name="C_label">
@@ -876,6 +1277,29 @@
    </property>
    <property name="text">
     <string>Update parameters</string>
+   </property>
+  </widget>
+  <widget class="QLineEdit" name="datapoints">
+   <property name="geometry">
+    <rect>
+     <x>130</x>
+     <y>390</y>
+     <width>51</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="datapoints_label">
+   <property name="geometry">
+    <rect>
+     <x>130</x>
+     <y>370</y>
+     <width>91</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Datapoints</string>
    </property>
   </widget>
  </widget>
