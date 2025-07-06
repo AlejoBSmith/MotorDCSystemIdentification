@@ -1,5 +1,4 @@
 import sys
-import random
 import pyqtgraph as pg
 import serial
 import numpy as np
@@ -10,8 +9,6 @@ from collections import deque
 from PyQt6 import QtWidgets, uic
 from PyQt6.QtWidgets import QDialogButtonBox, QButtonGroup
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QTabWidget
-from PyQt5.QtWidgets import QVBoxLayout
 from scipy.optimize import curve_fit
 from scipy.signal import cont2discrete
 
@@ -20,8 +17,9 @@ class MyDialog(QtWidgets.QDialog):
         super(MyDialog, self).__init__(parent)
         uic.loadUi('untitled.ui', self)
         # Initialize the serial connection (change 'COM3' to your serial port and set the appropriate baud rate)
-        self.serial_port = serial.Serial('COM10', 115200, timeout=1)
+        self.serial_port = serial.Serial('COM13', 115200, timeout=1)
         # Initialize data lists
+        self.header_written = False
         datapoints = 1000
         self.dataRPM_setpoint = deque(maxlen=datapoints)
         self.dataRPM_measured = deque(maxlen=datapoints)
@@ -160,26 +158,26 @@ class MyDialog(QtWidgets.QDialog):
         # Se inicializan los valores
         self.A.setText("0")
         self.B.setText("0")
-        self.C.setText("0.33877")
+        self.C.setText("0")
         self.D.setText("0")
-        self.E.setText("1.295")
-        self.F.setText("-0.5292")
+        self.E.setText("0")
+        self.F.setText("0")
         self.G.setText("0")
         self.H.setText("0")
         self.offset.setText("0")
         self.serial_in.setText(" ")
         self.serial_out.setText(" ")
-        self.tiemporeferencia.setText("750")
-        self.amplitude.setText("100")
-        self.reference.setText("100")
-        self.delay.setText("15")
+        self.tiemporeferencia.setText("3000")
+        self.amplitude.setText("150")
+        self.reference.setText("150")
+        self.delay.setText("20")
         self.modooperacion.setCurrentIndex(0)
         self.Kp.setText("1.0")
-        self.Ki.setText("0.1")
+        self.Ki.setText("0.01")
         self.Kd.setText("0")
         self.denorder.setText("1")
         self.numorder.setText("0")
-        self.datapoints.setText("500")
+        self.datapoints.setText("200")
         self.x_scale.setText("5")
         
         # Comienza todos los timers
@@ -248,7 +246,6 @@ class MyDialog(QtWidgets.QDialog):
             self.textBrowser.setText(f"Error in transfer function simulation: {e}")
 
     def discretize_function(self):
-        # Gather numerator and denominator coefficients
         try:
             num = [
                 float(self.snum3.text() or 0),
@@ -262,27 +259,25 @@ class MyDialog(QtWidgets.QDialog):
                 float(self.sden1.text() or 0),
                 float(self.sden0.text() or 0),
             ]
-
-            # Sampling time
             T_s = float(self.sampling_time.text())
 
             # Remove leading zeros
             num = [coef for coef in num if coef != 0] or [0]
             den = [coef for coef in den if coef != 0] or [1]
 
-            # Perform discretization
-            system_discrete = cont2discrete((num, den), T_s, method='bilinear')
+            system_discrete = cont2discrete((num, den), T_s, method='zoh')
             num_z, den_z, _ = system_discrete
+            print("Result:", num, den, num_z, den_z)
 
-            # Format the output for display
-            num_str = " + ".join([f"{coef:.3f}z^{len(num_z)-1-i}" for i, coef in enumerate(num_z[0])])
-            den_str = " + ".join([f"{coef:.3f}z^{len(den_z)-1-i}" for i, coef in enumerate(den_z)])
+            num_str = " + ".join([f"{coef:.5f}z^{len(num_z[0])-1-i}" for i, coef in enumerate(num_z[0])])
+            den_str = " + ".join([f"{coef:.5f}z^{len(den_z)-1-i}" for i, coef in enumerate(den_z)])
 
             result = f"H(z) = ({num_str}) / ({den_str})"
             self.discretizationresult.setText(result)
 
-        except ValueError:
-            self.discretizationresult.setText("Error: Invalid input. Please ensure all fields are filled correctly.")
+        except Exception as e:
+            self.discretizationresult.setText(f"Error: {e}")
+
 
     def resize_deque(self):
         datapoints = int(self.datapoints.text())
