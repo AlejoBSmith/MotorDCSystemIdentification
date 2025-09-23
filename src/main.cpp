@@ -1,354 +1,470 @@
 #include <Arduino.h>
 #include <movingAvg.h>
+#include <math.h>
 
-// Pines control motor
-const int pwmPin = 9;   // Enable pin (PWM input)
-const int in1Pin = 7;   // IN1 pin
-const int in2Pin = 8;   // IN2 pin
+// ====================================
+// #define USE_ARDUINO
+#define USE_TEENSY
+// ====================================
 
-// Pines encoder
-const int encoderA = 2; // Encoder channel A
-const int encoderB = 3; // Encoder channel B
+struct MotorPins {
+#ifdef USE_ARDUINO
+  const int pwmPin   = 9;
+  const int in1Pin   = 7;
+  const int in2Pin   = 8;
+  const int encoderA = 2;
+  const int encoderB = 3;
+#endif
 
-//Controlador
-bool inicio, a = 1;
-float x[5] = {0};  // Para entradas actuales y anteriores (u[k], u[k-1], u[k-2])
-float y[5] = {0};  // Para salidas actuales y anteriores (y[k], y[k-1], y[k-2])
-int referencia, encoderTicksActual, encoderTicksAnterior, TiempoCicloPromedio, medicion, modo = 0;
-int tab_activo = 0; // Para saber en qué tab está la interfaz gráfica, de eso depende si es PID o digital controller
-unsigned long tiempo, tiempoinicio, tiempoanterior, tiemporestart = 0;
-int tiemporeferencia = 2000; //Tiempo de referencia para cambio de setpoint
-int modooperacion, itemCount, tiporef, tiposenal, referenciaManual = 0;
-int pwmOutput, valorsalidapwm = 0;
-int controladorOUT, amplitudAuto, offset = 0;
-int pwmMinimoLinealidad = 70;
-int pwmMaximoLinealidad = 180;
-float tiempociclo, RPM, RPMPromedio = 0;
+#ifdef USE_TEENSY
+  const int pwmPin   = 23; // EN pin
+  const int in1Pin   = 22; // DIR pin, cambiar valor cambia la dirección de giro
+  const int in2Pin   = 21; // !SLEEP pin, active high
+  const int encoderA = 15;
+  const int encoderB = 14;
+#endif
+};
 
-//Variables para controlador
-float alfa = 0.01; //Relación entre el tiempo de muestreo y el tiempo de filtrado para componente derivativa Ts/Tf
-float A_cont, B_cont, C_cont, D_cont, E_cont, F_cont, G_cont, H_cont = 0;
-float Kp, Ki, Kd = 0;
-float error, previousError, integral, output, previousOutput, reference, distancia = 0;
-String DatoSerial;
+struct ControlParams {
+  float x[5] = {0, 0, 0, 0, 0};
+  float y[5] = {0, 0, 0, 0, 0};
+  float error = 0;
+  float integral_sum = 0;     // para PID posicional
+  float dFiltered = 0;        // para derivada filtrada
+  float previousError = 0;
+  float previousOutput = 0;
+  float controladorOUT = 0;
+  int PWMOUT = 0;
+  int ZM = 10; // ZM es la zona muerta del motor, se identifica con System Ident, con onda triangular
+  float A_cont = 0;
+  float B_cont = 0;
+  float C_cont = 0;
+  float D_cont = 0;
+  float E_cont = 0;
+  float F_cont = 0;
+  float G_cont = 0;
+  float H_cont = 0;
+  float Kp = 0;
+  float Ki = 0;
+  float Kd = 0;
+  float alfa = 0.01;
+  float time_constant = 0.01; // Time constant for PID algorithm derivative action filtering
+  int PIDtype = 0;
+};
 
-// IDENTIFICACIÓN DE SISTEMA
-// El avgwindowsize sirve para filtar las mediciones si son muy ruidosas.
-// El delayintencional permite recoger más datos para mediciones más limpias, pero reduce el margen de fase.
-int avgwindowsize = 1; // Variar este parámetro. El lag que introduce un movingAvg es (N-1)/2 muestras
-int delayintencional = 15; // Variar este parámetro
+struct SystemVariables {
+  bool inicio = false;
+  int modooperacion = 0;    // 0: sin acción, 1: identificación, 2: control de velocidad, 3: control de posición
+  int tab_activo = 0;       // 1: PID, 2: controlador digital
+  int tiposenal = 0;        // 0: PRBS, 1: Cuadrada, 2: Senoidal, etc.
+  int referencia = 0;
+  int medicion = 0;
+  int amplitudAuto = 0;
+  int offset = 0;
+  int referenciaManual = 0;
+  int pwmMinimoLinealidad = 80;
+  int pwmMaximoLinealidad = 200;
+};
 
+struct TimingData {
+  unsigned long tiempo = 0;
+  unsigned long tiempoinicio = 0;
+  unsigned long tiempoanterior = 0;
+  unsigned long tiemporestart = 0;
+  float tiempociclo = 0;
+  unsigned long int tiemporeferencia = 2000;
+  int delayintencional = 10;
+  float TiempoCicloPromedio = 0;
+};
+
+struct EncoderData {
+  volatile float encoderTicks = 0;
+  int encoderTicksActual = 0;
+  int encoderTicksAnterior = 0;
+  int lastEncoded = 0;
+};
+
+struct SerialData {
+  String DatoSerial;
+};
+
+struct MeasurementsData {
+  float RPM = 0;
+  float RPMPromedio = 0;
+};
+
+MotorPins pins;
+ControlParams ctrl;
+SystemVariables sys;
+TimingData timing;
+EncoderData enc;
+SerialData serialData;
+MeasurementsData meas;
+
+int avgwindowsize = 1;
 movingAvg RPMAvg(avgwindowsize);
-movingAvg TiempoCicloAvg(20); //Debe ser un valor estable
-
-// Variables para el conteo de pulsos del encoder
-volatile float encoderTicks = 0;
-int lastEncoded = 0;
+movingAvg TiempoCicloAvg(20);
 
 void divideString(String DatoSerial, char delimitador, String salida[], int limite) {
-    int posicion = 0; // Posición del delimitador en la cadena
-    int indice = 0;   // Índice del array de salida
-    // Bucle para encontrar los delimitadores y dividir la cadena
-    while ((posicion = DatoSerial.indexOf(delimitador)) != -1 && indice < limite - 1) {
-        salida[indice++] = DatoSerial.substring(0, posicion); // Extrae la subcadena antes del delimitador
-        DatoSerial = DatoSerial.substring(posicion + 1);         // Actualiza la entrada eliminando la parte procesada
-    }
-    salida[indice] = DatoSerial; // Agrega la última parte de la cadena
+  int posicion = 0;
+  int indice = 0;
+  while ((posicion = DatoSerial.indexOf(delimitador)) != -1 && indice < limite - 1) {
+    salida[indice++] = DatoSerial.substring(0, posicion);
+    DatoSerial = DatoSerial.substring(posicion + 1);
+  }
+  salida[indice] = DatoSerial;
 }
-void inicializavariables(){
-  referencia=0;
-  medicion=0;
-  tiempo = 0;
-  tiempoanterior=0;
-  tiempociclo=0;
-  RPMPromedio = 0;
-  encoderTicks=0;
-  controladorOUT=0;
-  RPM=0;
-  encoderTicksActual=0;
-  encoderTicksAnterior=0;
-  encoderTicks=0;
-  error=0;
-  previousError=0;
-  previousOutput=0;
-  distancia=0;
-  medicion=0;
-  lastEncoded=0;
+
+void inicializaVariables() {
+  sys.referencia = 0;
+  sys.medicion = 0;
+  timing.tiempo = 0;
+  timing.tiempoanterior = 0;
+  timing.tiempociclo = 0;
+  enc.encoderTicks = 0;
+  ctrl.controladorOUT = 0;
+  ctrl.error = 0;
+  ctrl.previousError = 0;
+  ctrl.previousOutput = 0;
+  enc.lastEncoded = 0;
   RPMAvg.reset();
 }
+
 void updateEncoder() {
-  // Se leen los encoder A y B para luego combinarlos en un solo número
-  // Para más info, ver https://en.wikipedia.org/wiki/Incremental_encoder sección "State transitions"
-  int MSB = digitalRead(encoderA);
-  int LSB = digitalRead(encoderB);
-
+  int MSB = digitalRead(pins.encoderA);
+  int LSB = digitalRead(pins.encoderB);
   int encoded = (MSB << 1) | LSB;
-  int sum = (lastEncoded << 2) | encoded;
-
-  if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoderTicks--;
-  if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoderTicks++; //Solo 1 dirección*/
-
-  lastEncoded = encoded;
+  int sum = (enc.lastEncoded << 2) | encoded;
+  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
+    enc.encoderTicks++;
+  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
+    enc.encoderTicks--;
+  enc.lastEncoded = encoded;
 }
 
-float PRBS() { //Psuedo Random Binary Sequence: valores aleatorios de tiempo definido entre valor mínimo y máximo	
-  if((tiempo - tiempoinicio) >= tiemporeferencia) {
-    referencia = random(pwmMinimoLinealidad, pwmMaximoLinealidad);
-    tiempoinicio = millis()-tiemporestart;
-  }
-  return referencia;
+float PRBS() {
+    static bool is_zero = false; // Track current phase
+    static unsigned long last_switch = 0;
+
+    unsigned long now = timing.tiempo;
+
+    // Duration for each phase
+    unsigned long phase_duration = timing.tiemporeferencia / 2;
+
+    if ((now - last_switch) >= phase_duration) {
+        last_switch = now;
+        is_zero = !is_zero; // Toggle phase
+
+        if (!is_zero) {
+            // On new value phase, pick random value
+            sys.referencia = random(sys.pwmMinimoLinealidad, sys.pwmMaximoLinealidad);
+        }
+    }
+
+    return is_zero ? 0 : sys.referencia;
 }
+
 float Cuadrada() {
-  if (fmod(tiempo, tiemporeferencia) < tiemporeferencia / 2) {
-    return amplitudAuto + offset;  // Valor alto
-  } 
-  else {
-    return offset;  // Valor bajo
-  }
+  if (fmod(timing.tiempo, timing.tiemporeferencia) < timing.tiemporeferencia / 2)
+    return sys.amplitudAuto + sys.offset;
+  else
+    return sys.offset;
 }
+
 float Senoidal() {
-  return (amplitudAuto * sin(2 * PI * tiempo / tiemporeferencia) + offset);
+  return (sys.amplitudAuto * sin(2 * PI * timing.tiempo / timing.tiemporeferencia) + sys.offset);
 }
+
 float TriangularZonaMuerta() {
-    float TiempoCiclo = fmod(tiempo, tiemporeferencia);
-    float TiempoSeccion = tiemporeferencia / 3;
-
-    if (TiempoCiclo < TiempoSeccion) {
-        return (amplitudAuto / TiempoSeccion) * TiempoCiclo;  // Rampa ascendente
-    } 
-    else if (TiempoCiclo < 2 * TiempoSeccion) {
-        return amplitudAuto - ((amplitudAuto / TiempoSeccion) * (TiempoCiclo - TiempoSeccion));  // Rampa descendente
-    } 
-    else {
-        return 0;  // Zona muerta (tercio final)
-    }
+  float TiempoCiclo = fmod(timing.tiempo, timing.tiemporeferencia);
+  float TiempoSeccion = timing.tiemporeferencia / 3.0;
+  if (TiempoCiclo < TiempoSeccion)
+    return (sys.amplitudAuto / TiempoSeccion) * TiempoCiclo;
+  else if (TiempoCiclo < 2 * TiempoSeccion)
+    return sys.amplitudAuto - ((sys.amplitudAuto / TiempoSeccion) * (TiempoCiclo - TiempoSeccion));
+  else
+    return 0;
 }
+
 float Impulso() {
-  if (tiempo < tiemporeferencia) {
-    return amplitudAuto + offset;  // Impulso de corta duración
-  } 
-  else {
-    return offset;  // Valor bajo
-    float tiempoespera = 10000; //Espera para el siguiente impulso
-    if (tiempo > tiemporeferencia + tiempoespera) {
-      tiempo = 0;
-    }
-  }
+  if (timing.tiempo < timing.tiemporeferencia)
+    return sys.amplitudAuto + sys.offset;
+  else
+    return sys.offset;
 }
-float Chirp() { //Barrido en frecuencia
-  return (amplitudAuto * sin(2 * PI * (0.001 * tiempo) * tiempo * 0.0001)) + offset;
+
+float Chirp() {
+  return (sys.amplitudAuto * sin(2 * PI * (0.001 * timing.tiempo) * timing.tiempo * 0.0001)) + sys.offset;
 }
+
 float DecaimientoExponencial() {
-  return amplitudAuto * exp(-0.0005 * tiempo) + offset;
+  return sys.amplitudAuto * exp(-0.0005 * timing.tiempo) + sys.offset;
 }
+
 float RuidoBlanco() {
-  return (random(0, 100) / 100.0) * amplitudAuto + offset;
+  return (random(0, 100) / 100.0) * sys.amplitudAuto + sys.offset;
 }
 
-int PID(float error){
-  // Discretización usando transformación bilineal (Tustin) de un PID continuo
-  float proportional = Kp * (error - previousError);
-  float integral = (Ki * TiempoCicloPromedio / 2.0) * (error + previousError);
-  float derivative = (2.0 * Kd / TiempoCicloPromedio) * (error - previousError);
-  controladorOUT = previousOutput + proportional + integral + derivative;
-  previousOutput = controladorOUT;
-  previousError = error;
-  return controladorOUT;
-}
-int GeneradorReferencia(int tiposenal){
-  switch (tiposenal) { //Tipo de señal es cuadrada, senoidal, etc
-    case 0:
-      return PRBS();
-    case 1:
-      return Cuadrada();
-    case 2:
-      return Senoidal();
-    case 3:
-      return TriangularZonaMuerta();
-    case 4:
-      return Impulso();
-    case 5:
-      return Chirp();
-    case 6:
-      return DecaimientoExponencial();
-    case 7:
-      return RuidoBlanco();
-    default:
-      return 0;
+int GeneradorReferencia(int tiposenal) {
+  switch (tiposenal) {
+    case 0: return PRBS();
+    case 1: return Cuadrada();
+    case 2: return Senoidal();
+    case 3: return TriangularZonaMuerta();
+    case 4: return Impulso();
+    case 5: return Chirp();
+    case 6: return DecaimientoExponencial();
+    case 7: return RuidoBlanco();
+    default: return 0;
   }
-  return referencia;
 }
-int EcuacionDiferencias(float error){
-  //Definición del controlador en ecuación diferencias (a partir de la FT en Z)
-  x[0] = error;  // error
 
-  // Calcula la salida en base a la ecuación del controlador
-  //float controladorOUT =  y[1] + 0.087028 * x[1]; //Ecuación ejemplo 1
-  //controladorOUT =  1.295 * y[1] - 0.5292 * y[2] + 0.33877 * x[2]; //Ecuación ejemplo 2
-  controladorOUT =  A_cont * x[0] + B_cont * x[1] + C_cont * x[2] + D_cont * x[3] + E_cont * y[1] + F_cont * y[2] + G_cont * y[3] + H_cont * y[4];
-  // Recorta la salida entre valor mínimo y máximo de PWM
-  if (modooperacion == 2){ //Para el control de velocidad, debe ser número positivo
-    controladorOUT = constrain(controladorOUT, 0, 255);
-  }
-  if (modooperacion == 3){ //Para control de posición, el pwm puede ser negativo (inversión de sentido de giro)
-    controladorOUT = constrain(controladorOUT, -255, 255);
-  }
-  // Mueve los valores anteriores de las entradas/salidas. X[] es error (entrada), Y[] el pwm (salida)
-  x[3] = x[2];   // u[k-3] = u[k-2]
-  x[2] = x[1];   // u[k-2] = u[k-1]
-  x[1] = x[0];   // u[k-1] = u[k]
+int PID_positional() {
+  // Se cambio todo a float porque si se castea a INT en medio del camino, para valores chicos
+  // de Ki, se pierde el valor por la cuantización (por el truncamiento en la conversión). 
+  // Si se usa float, se tiene más precisión y se pueden usar valores chicos. 
+  // Se castea solo cuando ya se va a escribir el PWM
+  float Ts = timing.TiempoCicloPromedio / 1000.0f;
+  float proportional = ctrl.Kp * ctrl.error;
+  ctrl.integral_sum += ctrl.Ki * ctrl.error * Ts;
+  ctrl.integral_sum = constrain(ctrl.integral_sum, 0.0f, 255.0f);
+  float dRaw = (ctrl.error - ctrl.previousError) / max(Ts, 1e-6f);
+  float alpha = ctrl.time_constant / (ctrl.time_constant + Ts);
+  ctrl.dFiltered = alpha * ctrl.dFiltered + (1 - alpha) * dRaw;
+  float derivative = ctrl.Kd * ctrl.dFiltered;
 
-  y[3] = y[2];   // y[k-3] = y[k-2]
-  y[2] = y[1];   // y[k-2] = y[k-1]
-  y[1] = controladorOUT;   // y[k-1] = y[k]
-  return controladorOUT;
+  // Salida
+  float u = proportional + ctrl.integral_sum + derivative;
+  if(sys.modooperacion==2)
+  u = constrain(u, 0.0f, 255.0f);
+  if(sys.modooperacion==3)
+  u = constrain(u, -255.0f, 255.0f);
+  ctrl.controladorOUT = u;
+  ctrl.previousError = ctrl.error;
+  return (int)(u + 0.5f);
 }
-/*int Euler(float error){
-    float errorfilt = alfa * error + (1 - alfa) * errorfiltanterior;
-    // e_d[k] = (e_f[k] - e_f[k-1]) / Tₛ, derivada con error filtrado
-    float derivativa = (errorfilt - errorfiltanterior) / (delayintencional+1); // +1 porque siempre es a 1ms mínimo.
-    // e_i[k+1] = e_i[k] + Tₛ e[k], integral
-    float integral = integral + error * (delayintencional+1);
 
-    // PID fórmula:
-    // u[k] = Kp e[k] + Ki e_i[k] + Kd e_d[k], salida al PWM
-    float controladorOUT = kp * error + ki * integral + kd * derivativa;
+int PID_incremental() {
+  // Se cambio todo a float porque si se castea a INT en medio del camino, para valores chicos
+  // de Ki, se pierde el valor por la cuantización (por el truncamiento en la conversión). 
+  // Si se usa float, se tiene más precisión y se pueden usar valores chicos. 
+  // Se castea solo cuando ya se va a escribir el PWM
+  float Ts = timing.TiempoCicloPromedio / 1000.0f;
+  float dError = ctrl.error - ctrl.previousError;
+  float dP = ctrl.Kp * dError;
+  float dI = ctrl.Ki * Ts * ctrl.error;
+  float dRaw = dError / max(Ts, 1e-6f);
+  float alpha = ctrl.time_constant / (ctrl.time_constant + Ts);
+  ctrl.dFiltered = alpha * ctrl.dFiltered + (1 - alpha) * dRaw;
+  float dD = ctrl.Kd * ctrl.dFiltered;
 
-    // valores para la próxima iteración
-    integralanterior = integral;
-    errorfiltanterior = errorfilt;
-    // valor PWM
-    return controladorOUT;
-}*/
+  // Salida incremental
+  float u = ctrl.previousOutput + dP + dI + dD;
+  if(sys.modooperacion==2)
+  u = constrain(u, 0.0f, 255.0f);
+  if(sys.modooperacion==3)
+  u = constrain(u, -255.0f, 255.0f);
+  ctrl.controladorOUT = u;
+  ctrl.previousOutput = u;
+  ctrl.previousError  = ctrl.error;
+  return (int)(u + 0.5f);
+}
+
+int EcuacionDiferencias() { //Aquí, X es la entrada (error) y Y es la salida (PWM Arduino)
+  ctrl.x[3] = ctrl.x[2];
+  ctrl.x[2] = ctrl.x[1];
+  ctrl.x[1] = ctrl.x[0];
+  ctrl.x[0] = ctrl.error;
+  ctrl.y[3] = ctrl.y[2];
+  ctrl.y[2] = ctrl.y[1];
+  ctrl.y[1] = ctrl.controladorOUT;
+  ctrl.controladorOUT = ctrl.A_cont * ctrl.x[0] + ctrl.B_cont * ctrl.x[1] + ctrl.C_cont * ctrl.x[2] + ctrl.D_cont * ctrl.x[3] +
+                         ctrl.E_cont * ctrl.y[1] + ctrl.F_cont * ctrl.y[2] + ctrl.G_cont * ctrl.y[3] + ctrl.H_cont * ctrl.y[4];
+  if (sys.modooperacion == 2)
+    ctrl.controladorOUT = constrain(ctrl.controladorOUT, 0, 255);
+  if (sys.modooperacion == 3)
+    ctrl.controladorOUT = constrain(ctrl.controladorOUT, -255, 255);
+  return ctrl.controladorOUT;
+}
 
 void setup() {
-  pinMode(pwmPin, OUTPUT);
-  pinMode(in1Pin, OUTPUT);
-  pinMode(in2Pin, OUTPUT);
-  digitalWrite(in1Pin, HIGH);
-  digitalWrite(in2Pin, LOW);
-  pinMode(encoderA, INPUT);
-  pinMode(encoderB, INPUT);
-  attachInterrupt(digitalPinToInterrupt(encoderA), updateEncoder, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoderB), updateEncoder, CHANGE);
+  Serial.setTimeout(5);
+  pinMode(pins.pwmPin, OUTPUT);
+  pinMode(pins.in1Pin, OUTPUT);
+  pinMode(pins.in2Pin, OUTPUT);
+  digitalWrite(pins.in1Pin, LOW);
+  digitalWrite(pins.in2Pin, HIGH);
+  pinMode(pins.encoderA, INPUT);
+  pinMode(pins.encoderB, INPUT);
+  attachInterrupt(digitalPinToInterrupt(pins.encoderA), updateEncoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pins.encoderB), updateEncoder, CHANGE);
   Serial.begin(115200);
-  a = 0; //variable auxiliar para cambio de referencia (setpoint)
   RPMAvg.begin();
   TiempoCicloAvg.begin();
-  randomSeed(analogRead(2)); //Inicializa aleatoriamente el generador de números aleatorios
+  randomSeed(analogRead(2));
 }
 
 void loop() {
-  // Comunicación serial con la interfaz gráfica
   if (Serial.available() > 0) {
-    DatoSerial = Serial.readStringUntil('\n');
-    String parts[60]; // El número de datos de entrada esperados
-    divideString(DatoSerial, ',', parts, 60);
-    inicio = parts[0].toInt();
-    modooperacion = parts[1].toInt();
-    A_cont = parts[2].toFloat();
-    B_cont = parts[3].toFloat();
-    C_cont = parts[4].toFloat();
-    D_cont = parts[5].toFloat();
-    E_cont = parts[6].toFloat();
-    F_cont = parts[7].toFloat();
-    G_cont = parts[8].toFloat();
-    H_cont = parts[9].toFloat();
-    delayintencional = parts[10].toInt();
-    tiemporeferencia = parts[11].toInt();
-    amplitudAuto = parts[12].toInt();
-    referenciaManual = parts[13].toInt();
-    offset = parts[14].toInt();
-    tiposenal = parts[15].toInt();
-    tab_activo = parts[16].toInt();
-    Kp = parts[17].toFloat();
-    Ki = parts[18].toFloat();
-    Kd = parts[19].toFloat();
-    if (delayintencional <=10){ //El delay intencional deber ser como MÍNIMO 10 con un baud rate de 115200. Con otro micro más rápido que el Arduino UNO puede bajar. Si no, se sobrecarga el buffer y se tildea
-      delayintencional=10;
-    }
-    inicializavariables();
-    tiemporestart = millis();
+    serialData.DatoSerial = Serial.readStringUntil('\n');
+    String parts[60];
+    divideString(serialData.DatoSerial, ',', parts, 60);
+    sys.inicio = parts[0].toInt();
+    sys.modooperacion = parts[1].toInt();
+    ctrl.A_cont = parts[2].toFloat();
+    ctrl.B_cont = parts[3].toFloat();
+    ctrl.C_cont = parts[4].toFloat();
+    ctrl.D_cont = parts[5].toFloat();
+    ctrl.E_cont = parts[6].toFloat();
+    ctrl.F_cont = parts[7].toFloat();
+    ctrl.G_cont = parts[8].toFloat();
+    ctrl.H_cont = parts[9].toFloat();
+    timing.delayintencional = parts[10].toInt();
+    timing.tiemporeferencia = parts[11].toInt();
+    sys.amplitudAuto = parts[12].toInt();
+    sys.referenciaManual = parts[13].toInt();
+    sys.offset = parts[14].toInt();
+    sys.tiposenal = parts[15].toInt();
+    sys.tab_activo = parts[16].toInt();
+    ctrl.Kp = parts[17].toFloat();
+    ctrl.Ki = parts[18].toFloat();
+    ctrl.Kd = parts[19].toFloat();
+    ctrl.ZM = parts[20].toInt();
+    ctrl.time_constant = parts[21].toFloat();
+    ctrl.PIDtype = parts[22].toInt();
+    if (timing.delayintencional <= 1)
+      timing.delayintencional = 1;
+    inicializaVariables();
+    timing.tiemporestart = millis();
   }
-  if (inicio == 1){
-  // El motor se puede configurar para hacer identificación de sistema (modo 1), control de velocidad (modo 2) o control de posición (modo 3)
-    switch(modooperacion){
-      case 0: // 0 es para que no haga nada
-        analogWrite(pwmPin, 0);
+  
+  if (sys.inicio == 1) {
+    switch (sys.modooperacion) {
+      case 0: //Inhabilitado
+        analogWrite(pins.pwmPin, 0);
         delay(10);
         break;
-
-      case 1: // IDENTIFICACIÓN DE SISTEMA
-        referencia = GeneradorReferencia(tiposenal);
-        controladorOUT = referencia; // Aquí no se usa el controlador, pero se manda la referencia para visualización
-        controladorOUT = constrain(controladorOUT, 0, 255);  // Para considerar valores positivos
-        RPM=encoderTicks/(TiempoCicloPromedio)*70; //Factor de conversión para pasar de Ticks a RPM. Esto depende de su encoder.
-        RPMPromedio=RPMAvg.reading(RPM);
-        encoderTicks=0; // Identificación de sistema reinicia el conteo de los ticks para cálculo de RPM
-        analogWrite(pwmPin, controladorOUT);
-        medicion = RPMPromedio;
+      case 1: { //System Identification
+        sys.referencia = GeneradorReferencia(sys.tiposenal);
+        ctrl.controladorOUT = sys.referencia;
+        ctrl.controladorOUT = constrain(ctrl.controladorOUT, 0, 255);
+        if (timing.TiempoCicloPromedio < 1) timing.TiempoCicloPromedio = 1;
+        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 70;
+        meas.RPMPromedio = RPMAvg.reading(meas.RPM);
+        enc.encoderTicks = 0;
+        ctrl.PWMOUT = ctrl.controladorOUT;
+        analogWrite(pins.pwmPin, ctrl.PWMOUT);
+        sys.medicion = meas.RPMPromedio;
         break;
-
-      case 2: // CONTROL DE VELOCIDAD
-        referencia = GeneradorReferencia(tiposenal);
-        RPM=encoderTicks/(TiempoCicloPromedio)*70; //Factor de conversión para pasar de Ticks a RPM. Esto depende de su encoder.
-        RPMPromedio=RPMAvg.reading(RPM);
-        encoderTicks=0; // Control de velocidad reinicia el conteo de los ticks para cálculo de RPM
-        error = referencia - RPMPromedio;
-        switch (tab_activo){
-          case 1: //PID
-            controladorOUT = PID(error);
-            break;
-          case 2: //Digital Controller
-            controladorOUT = EcuacionDiferencias(error);
-            break;
+      }
+      case 2: { //Control Velocidad
+        sys.referencia = GeneradorReferencia(sys.tiposenal);
+        if (timing.TiempoCicloPromedio < 1) timing.TiempoCicloPromedio = 1;
+        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 70;
+        meas.RPMPromedio = RPMAvg.reading(meas.RPM);
+        enc.encoderTicks = 0;
+        ctrl.error = sys.referencia - meas.RPMPromedio;
+        if (sys.tab_activo == 2){
+          switch (ctrl.PIDtype) {
+            case 0:
+              ctrl.controladorOUT = PID_incremental();
+              break;
+            case 1:
+              ctrl.controladorOUT = PID_positional();
+              break;
+          }
+          if (sys.referencia != 0){
+            ctrl.PWMOUT = ctrl.controladorOUT + ctrl.ZM; // Solo agrega la zona muerta si la salida es diferente de 0
+            ctrl.PWMOUT = constrain(ctrl.PWMOUT, 0, 255);
+          }
+          else if (sys.referencia == 0){
+            ctrl.previousOutput = 0;
+            ctrl.previousError = 0;
+            ctrl.controladorOUT = 0;
+            ctrl.PWMOUT = 0;
+          }
         }
-        controladorOUT = constrain(controladorOUT, 0, 255);  // Para considerar valores positivos
-        analogWrite(pwmPin, controladorOUT);
-        medicion = RPMPromedio;
+        else if (sys.tab_activo == 4){
+          ctrl.controladorOUT = EcuacionDiferencias();
+          if (sys.referencia != 0){
+            ctrl.PWMOUT = ctrl.controladorOUT + ctrl.ZM; // Solo agrega la zona muerta si la salida es diferente de 0
+            ctrl.PWMOUT = constrain(ctrl.PWMOUT, 0, 255);
+          }
+          else if (sys.referencia == 0){
+            ctrl.previousOutput = 0;
+            ctrl.previousError = 0;
+            ctrl.controladorOUT = 0;
+            ctrl.PWMOUT = 0;
+          }
+        }
+        analogWrite(pins.pwmPin, ctrl.PWMOUT);
+        sys.medicion = meas.RPMPromedio;
         break;
-
-      case 3: // CONTROL DE POSICIÓN
-        referencia = GeneradorReferencia(tiposenal);
-        distancia = encoderTicks;
-        error = referencia - distancia;
-        controladorOUT = EcuacionDiferencias(error);
-
-        // Enviar la salida del controlador al PWM
-        controladorOUT = constrain(controladorOUT, -255, 255);  // Para considerar valores positivos y negativos
-        if(error>=0){
-          digitalWrite(in1Pin, HIGH); //Dirección de giro A. Para más detalle, hoja de datos l298N
-          digitalWrite(in2Pin, LOW);
+      }
+      case 3: { // Control Posición
+        sys.referencia = GeneradorReferencia(sys.tiposenal);
+        ctrl.error = sys.referencia - enc.encoderTicks;
+        float u = 0;
+        if (sys.tab_activo == 2) {         // PID tab
+          switch (ctrl.PIDtype) {
+            case 0: u = PID_incremental(); break;
+            case 1: u = PID_positional();  break;
+          }
         }
-        if(error<=0){
-          digitalWrite(in1Pin, LOW); //Dirección de giro -A
-          digitalWrite(in2Pin, HIGH);
+        else if (sys.tab_activo == 4) {    // Difference equation tab
+          u = EcuacionDiferencias();
         }
-        delay(2);
-        controladorOUT=abs(controladorOUT);
-        analogWrite(pwmPin,controladorOUT);
-        medicion = distancia;
+        
+        // --- Deadzone compensation ---
+        if (u > 0)       u += ctrl.ZM;
+        else if (u < 0)  u -= ctrl.ZM;
+        // --- Saturation ---
+        u = constrain(u, -255, 255);
+        // --- Direction control ---
+        #ifdef USE_ARDUINO
+          if (u >= 0) {
+            digitalWrite(pins.in1Pin, HIGH);
+            digitalWrite(pins.in2Pin, LOW);
+          } else {
+            digitalWrite(pins.in1Pin, LOW);
+            digitalWrite(pins.in2Pin, HIGH);
+          }
+        #endif
+
+        #ifdef USE_TEENSY
+          if (u >= 0) {
+            digitalWrite(pins.in1Pin, LOW);  // DIR = forward
+          } else {
+            digitalWrite(pins.in1Pin, HIGH);   // DIR = reverse
+          }
+        #endif
+        // --- Apply PWM (magnitude only) ---
+        ctrl.controladorOUT = u;            // keep signed version for logs
+        ctrl.PWMOUT = abs((int)u);          // magnitude actually sent
+        analogWrite(pins.pwmPin, ctrl.PWMOUT);
+        // --- Measurement update ---
+        sys.medicion = enc.encoderTicks;
         break;
+      }
     }
-  }
-  if (inicio == 0){
-    analogWrite(pwmPin,0);
+  } else {
+    analogWrite(pins.pwmPin, 0);
     delay(10);
   }
   
-  //Cálculo de tiempos
-  TiempoCicloPromedio=TiempoCicloAvg.reading(tiempociclo);
-  tiempoanterior=tiempo;
-  tiempo=millis()-tiemporestart;
-  tiempociclo=tiempo-tiempoanterior;
+  timing.tiempoanterior = timing.tiempo;
+  timing.tiempo = millis() - timing.tiemporestart;
+  timing.tiempociclo = timing.tiempo - timing.tiempoanterior;
+  timing.TiempoCicloPromedio = (float)TiempoCicloAvg.reading(timing.tiempociclo);
 
-  //Comunicación de datos
-  if (inicio == 1){
-    Serial.print(referencia);
+  if (sys.inicio == 1) {
+    Serial.print(sys.referencia);
     Serial.print(" ");
-    Serial.print(medicion);
+    Serial.print(int(sys.medicion));
     Serial.print(" ");
-    Serial.println(controladorOUT);
+    Serial.print(int(timing.TiempoCicloPromedio));
+    Serial.print(" ");
+    Serial.println(ctrl.PWMOUT);
   }
-  delay(delayintencional); //El delay intencional debe ser como mínimo de 10 ms. Si no, se sobrecarga el búffer y se tildea la GUI
+  delay(timing.delayintencional);
 }
