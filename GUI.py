@@ -14,10 +14,29 @@ from PyQt6.QtCore import QTimer
 from scipy.optimize import curve_fit
 from scipy.signal import cont2discrete
 
+KNOWN_VIDPID = {
+    (0x16C0, 0x0483),  # Teensy 4.x USB-Serial (PJRC)
+    (0x2341, 0x006D),  # Arduino UNO R4 WiFi
+    (0x2341, 0x006C),  # Arduino UNO R4 Minima
+}
+PREF_DESCR = ("Teensy", "UNO R4")  # optional: bias by description text
+
+def auto_find_port():
+    ports = list(serial.tools.list_ports.comports())
+    # Prefer matches by VID/PID, then by description, else give up
+    for p in ports:
+        if (p.vid, p.pid) in KNOWN_VIDPID:
+            return p.device
+    for p in ports:
+        if any(k in (p.description or "") for k in PREF_DESCR):
+            return p.device
+    return None
+
 class PortSelectDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, initial_port=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select COM Port")
+        self.initial_port = initial_port
         self._ports = []
         # Widgets
         self.label = QLabel("Choose the serial (COM) port to use:")
@@ -47,8 +66,12 @@ class PortSelectDialog(QDialog):
         self.combo.clear()
         self._ports = list(serial.tools.list_ports.comports())
         for p in self._ports:
-            # Show device and description for clarity
             self.combo.addItem(f"{p.device} — {p.description}", userData=p.device)
+        # preselect previous choice if still present
+        if self.initial_port is not None:
+            idx = self.combo.findData(self.initial_port)
+            if idx != -1:
+                self.combo.setCurrentIndex(idx)
 
     def selected_port(self):
         idx = self.combo.currentIndex()
@@ -63,18 +86,22 @@ class PortSelectDialog(QDialog):
             return
         self.accept()
 
-
 class MyDialog(QtWidgets.QDialog):
     def __init__(self, port=None, parent=None):
         super(MyDialog, self).__init__(parent)
-        uic.loadUi('untitled.ui', self)
-        # Initialize the serial connection using the selected port
+        uic.loadUi('untitled.ui', self)  # load the UI first
+        base_title = "Motor DC Control - By A Von Chong"
+        if port:
+            self.setWindowTitle(f"{base_title} — {port}")
+        else:
+            self.setWindowTitle(f"{base_title} — no port")
         self.serial_port = None
         if port:
             try:
                 self.serial_port = serial.Serial(port, 115200, timeout=1)
             except Exception as e:
-                QMessageBox.critical(self, "Serial error", f"Could not open port {port}:\n{e}")
+                QMessageBox.critical(self, "Serial error",
+                                     f"Could not open port {port}:\n{e}")
                 self.serial_port = None
 
         # Initialize data lists
@@ -556,17 +583,24 @@ class MyDialog(QtWidgets.QDialog):
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    # Show COM port selection dialog first
-    port_dlg = PortSelectDialog()
-    if port_dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-        # User cancelled
-        sys.exit(0)
-    port = port_dlg.selected_port()
 
-    dialog = MyDialog(port=port)
-    dialog.show()
-    sys.exit(app.exec())
+    port = auto_find_port()
+    while True:
+        if not port:
+            sel = PortSelectDialog()
+            if sel.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                sys.exit(0)
+            port = sel.selected_port()
 
+        dlg = MyDialog(port=port)
+        if dlg.serial_port is not None:   # opened OK in your constructor
+            dlg.setWindowTitle(f"Motor DC Control — {port} - By A Von Chong")
+            dlg.show()
+            sys.exit(app.exec())
+
+        QtWidgets.QMessageBox.warning(None, "Serial",
+                                      f"Couldn't open {port}. Close other apps or pick another.")
+        port = None  # force dialog on next loop
 
 if __name__ == "__main__":
     main()

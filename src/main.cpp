@@ -3,25 +3,25 @@
 #include <math.h>
 
 // ====================================
-// #define USE_ARDUINO
+//#define USE_ARDUINO
 #define USE_TEENSY
 // ====================================
 
 struct MotorPins {
-#ifdef USE_ARDUINO
+#if defined(USE_ARDUINO)
   const int pwmPin   = 9;
   const int in1Pin   = 7;
   const int in2Pin   = 8;
   const int encoderA = 2;
   const int encoderB = 3;
-#endif
-
-#ifdef USE_TEENSY
+#elif defined(USE_TEENSY)
   const int pwmPin   = 23; // EN pin
   const int in1Pin   = 22; // DIR pin, cambiar valor cambia la dirección de giro
   const int in2Pin   = 21; // !SLEEP pin, active high
   const int encoderA = 15;
   const int encoderB = 14;
+#else
+  #error "Tarjeta no soportada"
 #endif
 };
 
@@ -34,6 +34,7 @@ struct ControlParams {
   float previousError = 0;
   float previousOutput = 0;
   float controladorOUT = 0;
+  const int PPR = 240; // Pulsos por revolución encoder
   int PWMOUT = 0;
   int ZM = 10; // ZM es la zona muerta del motor, se identifica con System Ident, con onda triangular
   float A_cont = 0;
@@ -78,10 +79,10 @@ struct TimingData {
 };
 
 struct EncoderData {
-  volatile float encoderTicks = 0;
-  int encoderTicksActual = 0;
-  int encoderTicksAnterior = 0;
-  int lastEncoded = 0;
+  volatile int32_t encoderTicks = 0;
+  int32_t encoderTicksActual = 0;
+  int32_t encoderTicksAnterior = 0;
+  int32_t lastEncoded = 0;
 };
 
 struct SerialData {
@@ -131,6 +132,9 @@ void inicializaVariables() {
 }
 
 void updateEncoder() {
+  // Una explicación del funcionamiento de esto está disponible en:
+  // https://en.wikipedia.org/wiki/Incremental_encoder
+  // Sección state transitions
   int MSB = digitalRead(pins.encoderA);
   int LSB = digitalRead(pins.encoderB);
   int encoded = (MSB << 1) | LSB;
@@ -227,7 +231,10 @@ int PID_positional() {
   float Ts = timing.TiempoCicloPromedio / 1000.0f;
   float proportional = ctrl.Kp * ctrl.error;
   ctrl.integral_sum += ctrl.Ki * ctrl.error * Ts;
-  ctrl.integral_sum = constrain(ctrl.integral_sum, 0.0f, 255.0f);
+  // Para hacer el recorte dependiendo de si está en modo control de posición o velocidad
+  float lo = (sys.modooperacion==3) ? -255.0f : 0.0f;
+  float hi = 255.0f;
+  ctrl.integral_sum = constrain(ctrl.integral_sum, lo, hi);
   float dRaw = (ctrl.error - ctrl.previousError) / max(Ts, 1e-6f);
   float alpha = ctrl.time_constant / (ctrl.time_constant + Ts);
   ctrl.dFiltered = alpha * ctrl.dFiltered + (1 - alpha) * dRaw;
@@ -275,9 +282,11 @@ int EcuacionDiferencias() { //Aquí, X es la entrada (error) y Y es la salida (P
   ctrl.x[2] = ctrl.x[1];
   ctrl.x[1] = ctrl.x[0];
   ctrl.x[0] = ctrl.error;
+  ctrl.y[4] = ctrl.y[3];
   ctrl.y[3] = ctrl.y[2];
   ctrl.y[2] = ctrl.y[1];
   ctrl.y[1] = ctrl.controladorOUT;
+
   ctrl.controladorOUT = ctrl.A_cont * ctrl.x[0] + ctrl.B_cont * ctrl.x[1] + ctrl.C_cont * ctrl.x[2] + ctrl.D_cont * ctrl.x[3] +
                          ctrl.E_cont * ctrl.y[1] + ctrl.F_cont * ctrl.y[2] + ctrl.G_cont * ctrl.y[3] + ctrl.H_cont * ctrl.y[4];
   if (sys.modooperacion == 2)
@@ -349,7 +358,7 @@ void loop() {
         ctrl.controladorOUT = sys.referencia;
         ctrl.controladorOUT = constrain(ctrl.controladorOUT, 0, 255);
         if (timing.TiempoCicloPromedio < 1) timing.TiempoCicloPromedio = 1;
-        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 70;
+        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 60.0f * 1000.0f / (4.0f * ctrl.PPR);
         meas.RPMPromedio = RPMAvg.reading(meas.RPM);
         enc.encoderTicks = 0;
         ctrl.PWMOUT = ctrl.controladorOUT;
@@ -360,7 +369,9 @@ void loop() {
       case 2: { //Control Velocidad
         sys.referencia = GeneradorReferencia(sys.tiposenal);
         if (timing.TiempoCicloPromedio < 1) timing.TiempoCicloPromedio = 1;
-        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 70;
+        // Estamos usando decodificación 4x, porque se está usando "CHANGE" en los interrupt
+        // y se está haciendo interrupt en los canales A y B
+        meas.RPM = enc.encoderTicks / (float)timing.TiempoCicloPromedio * 60.0f * 1000.0f / (4.0f * ctrl.PPR);
         meas.RPMPromedio = RPMAvg.reading(meas.RPM);
         enc.encoderTicks = 0;
         ctrl.error = sys.referencia - meas.RPMPromedio;
