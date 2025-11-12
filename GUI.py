@@ -7,6 +7,7 @@ import pandas as pd
 import control as ctrl
 from datetime import datetime
 from collections import deque
+from PyQt6.QtCore import Qt
 from PyQt6 import QtCore
 from PyQt6 import QtWidgets, uic
 from PyQt6.QtWidgets import QDialogButtonBox, QButtonGroup, QMessageBox, QDialog, QLabel, QComboBox, QPushButton, QHBoxLayout, QVBoxLayout
@@ -89,7 +90,24 @@ class PortSelectDialog(QDialog):
 class MyDialog(QtWidgets.QDialog):
     def __init__(self, port=None, parent=None):
         super(MyDialog, self).__init__(parent)
-        uic.loadUi('untitled.ui', self)  # load the UI first
+        uic.loadUi('QtDesignerGUI.ui', self)  # load the UI first
+        # ---- make the dialog look/behave like a normal resizable window ----
+        flags = self.windowFlags()
+        flags |= Qt.WindowType.WindowSystemMenuHint          # show system menu
+        flags |= Qt.WindowType.WindowMinMaxButtonsHint       # add Min/Max buttons
+        flags &= ~Qt.WindowType.WindowContextHelpButtonHint  # remove the "?" button
+        self.setWindowFlags(flags)
+
+        # allow resizing even if the .ui layout had "SetFixedSize"
+        if self.layout() is not None:
+            self.layout().setSizeConstraint(
+                QtWidgets.QLayout.SizeConstraint.SetDefaultConstraint
+            )
+
+        # optional but useful
+        self.setSizeGripEnabled(True)      # corner size grip on some platforms
+        self.setMinimumSize(900, 600)      # pick a sane minimum so content isn’t cramped
+
         base_title = "Motor DC Control - By A Von Chong"
         if port:
             self.setWindowTitle(f"{base_title} — {port}")
@@ -106,10 +124,18 @@ class MyDialog(QtWidgets.QDialog):
 
         # Initialize data lists
         self.header_written = False
+        self.reference.setVisible(False)
+        self.reference_label.setVisible(False)
+        self.slider.setVisible(False)
+        self.slider_label.setVisible(False)
+        self.manualinput.setVisible(False)
+        self.automaticinput.setVisible(False)
+
         datapoints = 1000
         self.dataRPM_setpoint = deque(maxlen=datapoints)
         self.dataRPM_measured = deque(maxlen=datapoints)
         self.dataPWM = deque(maxlen=datapoints)
+        self.dataDT = deque(maxlen=datapoints)   # ms per sample
         #self.tabWidget.setTabText(0, "Sys Ident")
         #self.tabWidget.setTabText(1, "Simulation")
         #self.tabWidget.setTabText(2, "PID")
@@ -163,6 +189,9 @@ class MyDialog(QtWidgets.QDialog):
         self.grupo_identificationdata.addButton(self.identdatafile, 0)
         self.grupo_identificationdata.setExclusive(True)
         self.identdatagraph.setChecked(True)
+        self.identdatagraph.setVisible(False)
+        self.identdatafile.setVisible(False)
+        self.identdata.setVisible(False)
 
         # Define el botón de start/stop
         self.StartStop.clicked.connect(self.toggleStartStop)
@@ -187,11 +216,28 @@ class MyDialog(QtWidgets.QDialog):
         placeholderLayoutsim_response = self.sim_response.parentWidget().layout()
 
         self.graphWidgetRPM = pg.PlotWidget()
+
+        self.legendRPM  = self.graphWidgetRPM.addLegend()
+        pi = self.graphWidgetRPM.getPlotItem()
+        self.legendRPM = pi.addLegend()
+        self.legendRPM.setParentItem(pi.vb)
+        self.legendRPM.anchor(itemPos=(1,0), parentPos=(1,0), offset=(10, -10))
+
+        pi = self.graphWidgetRPM.getPlotItem()
+        pi.setLabel('left',   'Motor Input / Output', units='PWM / RPM')
         self.graphWidgetRPM.setYRange(0, 120)
         placeholderLayoutRPM.replaceWidget(self.RPM, self.graphWidgetRPM)
         self.RPM.deleteLater()
 
         self.graphWidgetPWM = pg.PlotWidget()
+        self.legendPWM  = self.graphWidgetPWM.addLegend()
+        piSETPOINT = self.graphWidgetPWM.getPlotItem()
+        self.legendPWM = piSETPOINT.addLegend()
+        self.legendPWM.setParentItem(piSETPOINT.vb)
+        self.legendPWM.anchor(itemPos=(1,0), parentPos=(1,0), offset=(10, -10))
+        pi = self.graphWidgetPWM.getPlotItem()
+        pi.setLabel('left',   'uController output', units='PWM')
+        pi.setLabel('bottom', 'Time',  units='s') 
         self.graphWidgetPWM.setYRange(0, 255)
         placeholderLayoutPWM.replaceWidget(self.PWM, self.graphWidgetPWM)
         self.PWM.deleteLater()
@@ -207,19 +253,13 @@ class MyDialog(QtWidgets.QDialog):
         self.sim_response.deleteLater()
 
         # Initialize curves for fast updates
-        self.curve_setpoint = self.graphWidgetRPM.plot(pen=pg.mkPen(color='b', width=3, style=QtCore.Qt.PenStyle.SolidLine))  # Blue line for setpoint
-        self.curve_measured = self.graphWidgetRPM.plot(pen=pg.mkPen(color='r', width=3, style=QtCore.Qt.PenStyle.SolidLine))  # Red line for measured
-        self.curve_pwm = self.graphWidgetPWM.plot(pen=pg.mkPen(color='g', width=3, style=QtCore.Qt.PenStyle.SolidLine))       # Green line for PWM
+        self.curve_setpoint = self.graphWidgetRPM.plot(name="Input", pen=pg.mkPen(color='b', width=3, style=QtCore.Qt.PenStyle.SolidLine))  # Blue line for setpoint
+        self.curve_measured = self.graphWidgetRPM.plot(name="Output", pen=pg.mkPen(color='r', width=3, style=QtCore.Qt.PenStyle.SolidLine))  # Red line for measured
+        self.curve_pwm = self.graphWidgetPWM.plot(name="PWM", pen=pg.mkPen(color='g', width=3, style=QtCore.Qt.PenStyle.SolidLine))       # Green line for PWM
 
         # Disconnect the standard dialog accept/reject slots
         # Esto se hace para quitarle los valores por default que tienen los botones de
         # Ok y cancel (que es cerrar la ventana)
-        self.buttonBox.button(QDialogButtonBox.StandardButton.Ok).clicked.disconnect()
-        self.buttonBox.button(QDialogButtonBox.StandardButton.Cancel).clicked.disconnect()
-
-        # Connect the buttons to custom slots
-        self.buttonBox.button(QDialogButtonBox.StandardButton.Ok).clicked.connect(self.ok_button_clicked)
-        self.buttonBox.button(QDialogButtonBox.StandardButton.Cancel).clicked.connect(self.cancel_button_clicked)
 
         # Setup the QTimer
         # Este es el timer para la rapidez de update de la hora
@@ -250,14 +290,15 @@ class MyDialog(QtWidgets.QDialog):
         self.reference.setText("150")
         self.delay.setText("20")
         self.modooperacion.setCurrentIndex(0)
-        self.Kp.setText("1.0")
-        self.Ki.setText("0.01")
+        self.Kp.setText("0")
+        self.Ki.setText("0")
         self.Kd.setText("0")
         self.denorder.setText("1")
         self.numorder.setText("0")
         self.datapoints.setText("200")
         self.x_scale.setText("5")
-        self.time_constant.setText("0")
+        self.time_constant.setText("0.2")
+        self.reset_time.setText("0.5")
 
         # Comienza todos los timers
         self.timer.start()
@@ -325,7 +366,29 @@ class MyDialog(QtWidgets.QDialog):
             self.textBrowser.setText(f"Error in transfer function simulation: {e}")
 
     def discretize_function(self):
+
+        def _strip_leading_zeros(coefs, eps=1e-12):
+            # input is [s^n, s^(n-1), ..., s^0]; remove zeros from the front
+            c = list(map(float, coefs))
+            while c and abs(c[0]) < eps:
+                c.pop(0)
+            return c if c else [0.0]
+
+        def _poly_to_zinv_str(c, fmt='{:.5g}', eps=1e-9):
+            # c = [c0, c1, c2, ...] -> c0 + c1 z^-1 + c2 z^-2 + ...
+            parts = []
+            for k, ck in enumerate(np.asarray(c, float)):
+                if abs(ck) < eps:
+                    continue
+                if k == 0:
+                    parts.append(fmt.format(ck))
+                else:
+                    parts.append(f"{fmt.format(ck)} z^-{k}")
+            s = " + ".join(parts) if parts else "0"
+            return s.replace("+ -", "- ")
+
         try:
+            # Read S-domain polynomials (entered as s^3,s^2,s^1,s^0)
             num = [
                 float(self.snum3.text() or 0),
                 float(self.snum2.text() or 0),
@@ -338,33 +401,39 @@ class MyDialog(QtWidgets.QDialog):
                 float(self.sden1.text() or 0),
                 float(self.sden0.text() or 0),
             ]
-            T_s = float(self.sampling_time.text())
+            T_s   = float(self.sampling_time.text())
+            method = self.method.currentText()  # e.g., 'zoh', 'foh', 'bilinear' (tustin)
 
-            # Remove leading zeros
-            num = [coef for coef in num if coef != 0] or [0]
-            den = [coef for coef in den if coef != 0] or [1]
+            # Clean leading zeros (highest powers)
+            num = _strip_leading_zeros(num)
+            den = _strip_leading_zeros(den)
 
-            method = self.method.currentText()
+            # Discretize (SciPy returns TF in z^-1)
+            num_z, den_z, _ = cont2discrete((num, den), T_s, method)
+            num_z = np.ravel(num_z).astype(float)
+            den_z = np.ravel(den_z).astype(float)
 
-            system_discrete = cont2discrete((num, den), T_s, method)
-            num_z, den_z, _ = system_discrete
-            print("Result:", num, den, num_z, den_z)
+            # Normalize so a0 == 1
+            if abs(den_z[0]) > 0:
+                num_z /= den_z[0]
+                den_z /= den_z[0]
 
-            num_str = " + ".join([f"{coef:.5f}z^{len(num_z[0])-1-i}" for i, coef in enumerate(num_z[0])])
-            den_str = " + ".join([f"{coef:.5f}z^{len(den_z)-1-i}" for i, coef in enumerate(den_z)])
+            # Pretty string in z^-1 form
+            num_str = _poly_to_zinv_str(num_z)
+            den_str = _poly_to_zinv_str(den_z)
+            result  = f"H(z) = ({num_str}) / ({den_str}),  Ts = {T_s:g} s"
 
-            result = f"H(z) = ({num_str}) / ({den_str})"
             self.discretizationresult.setText(result)
 
         except Exception as e:
             self.discretizationresult.setText(f"Error: {e}")
-
-
+    
     def resize_deque(self):
         datapoints = int(self.datapoints.text())
         self.dataRPM_setpoint = deque(list(self.dataRPM_setpoint)[-datapoints:], maxlen=datapoints)
         self.dataRPM_measured = deque(list(self.dataRPM_measured)[-datapoints:], maxlen=datapoints)
         self.dataPWM = deque(list(self.dataPWM)[-datapoints:], maxlen=datapoints)
+        self.dataDT = deque(list(self.dataDT)[-datapoints:], maxlen=datapoints)
 
     def sendModeOperation(self):
         selected_text = self.modooperacion.currentText()
@@ -389,13 +458,13 @@ class MyDialog(QtWidgets.QDialog):
         reference = self.reference.text()
         delay =  self.delay.text()
         # Send the data
-        tiporef = self.grupo_checkboxes.checkedId()
+        tiporef = int(self.automaticinput.isChecked())
         tiposenal = self.tiposenal.currentIndex()
         selected_text = self.modooperacion.currentText()
         selected_mode = self.mode_map.get(selected_text, "0")
         tiemporeferencia = self.tiemporeferencia.text()
-        amplitudAuto = self.amplitude.text()
-        refernciaManual = self.reference.text()
+        amplitud = self.amplitude.text()
+        referenciaManual = self.reference.text()
         offset = self.offset.text()
         activetab = self.tabWidget.currentIndex()
         Kp = self.Kp.text()
@@ -404,7 +473,21 @@ class MyDialog(QtWidgets.QDialog):
         deadzone = self.deadzone.text()
         time_constant = self.time_constant.text()
         PIDtype = self.PIDtype.currentIndex()
-        self.SendData(StartStop, selected_mode, A, B, C, D, E, F, G, H, delay, tiemporeferencia, amplitudAuto, refernciaManual,offset,tiposenal,activetab,Kp,Ki,Kd,deadzone,time_constant,PIDtype)
+        reset_time = self.reset_time.text()
+        self.SendData(StartStop, selected_mode, A, B, C, D, E, F, G, H, delay, tiemporeferencia, amplitud, referenciaManual,offset,tiposenal,activetab,Kp,Ki,Kd,deadzone,time_constant,PIDtype,tiporef,reset_time)
+        if selected_text == "Disabled":
+            self.textBrowser.setText("System disabled, select an operation mode before starting")
+        if selected_text != "Disabled":
+            self.textBrowser.setText("")
+        if selected_mode == "0" or selected_mode == "1" :
+            pi = self.graphWidgetRPM.getPlotItem()
+            pi.setLabel('left', 'Motor Input / Output', units='PWM / RPM')
+        if selected_mode == "2":
+            pi = self.graphWidgetRPM.getPlotItem()
+            pi.setLabel('left', 'Motor Speed', units='RPM')
+        if selected_mode == "3":
+            pi = self.graphWidgetRPM.getPlotItem()
+            pi.setLabel('left', 'Motor Position', units='degrees')
 
     def plot_simulation(self, t, y):
         self.graphWidgetRPM.plot(t, y, pen='y', name="Simulated (Threaded)")
@@ -420,121 +503,179 @@ class MyDialog(QtWidgets.QDialog):
 
     def identify_system(self):
         try:
-            # Clear the previous results
+            # Clear previous results/plot
             self.graphWidgetforced_response.clear()
 
-            # Step 1: Extract input-output data from deques
-            u = np.array(self.dataPWM, dtype=float)  # Input: PWM signal
-            y = np.array(self.dataRPM_measured, dtype=float)  # Output: Measured RPM
+            # ---- 1) Grab data from deques ----
+            u  = np.array(self.dataPWM, dtype=float)             # input (PWM)
+            y  = np.array(self.dataRPM_measured, dtype=float)    # output (RPM)
+            dt = np.array(self.dataDT, dtype=float) / 1000.0     # ms -> s
+
             numorder = int(self.numorder.text())
             denorder = int(self.denorder.text())
 
-            # Check if data is sufficient
-            if len(u) < 10 or len(y) < 10:
+            # Basic sanity checks
+            if min(len(u), len(y), len(dt)) < 10:
                 self.identificationresult.setText("Insufficient data for system identification.")
                 return
 
-            # Step 2: Generate time vector
-            sampling_interval = self.timer.interval() / 1000.0  # Timer interval in seconds
-            time = np.arange(len(u)) * sampling_interval
+            # Use the most recent overlapping window
+            n = min(len(u), len(y), len(dt))
+            u = u[-n:]; y = y[-n:]; dt = dt[-n:]
 
-            # Step 3: Define a transfer function model with variable order
+            # ---- 2) Build cumulative time from dt ----
+            time = np.empty(n, dtype=float)
+            time[0] = 0.0
+            if n > 1:
+                time[1:] = np.cumsum(dt[:-1])
+
+            # ---- 3) Make time uniform (lsim/forced_response requirement) ----
+            # Use median Ts and interpolate u,y to that grid
+            if n > 2:
+                Ts = float(np.median(np.diff(time)))
+            else:
+                Ts = float(dt.mean()) if n > 1 else 1e-3
+
+            # If jitter is small, snap; otherwise interpolate to a uniform grid
+            diffs = np.diff(time) if n > 1 else np.array([Ts])
+            if np.max(np.abs(diffs - Ts)) <= 0.05 * Ts:
+                # Snap to perfect grid
+                N = n
+                time = np.arange(N, dtype=float) * Ts
+            else:
+                # Interpolate to uniform grid covering the same duration
+                N = int(np.round(time[-1] / Ts)) + 1
+                time_uniform = np.arange(N, dtype=float) * Ts
+                u = np.interp(time_uniform, time, u)
+                y = np.interp(time_uniform, time, y)
+                time = time_uniform
+
+            # ---- 4) Model used by curve_fit ----
             def transfer_function_fit(t, *coefficients):
-                # Separate coefficients for numerator and denominator
-                num_coefficients = coefficients[:numorder + 1]
-                den_coefficients = coefficients[numorder + 1:]
+                # coefficients = [b0, b1, ..., a1, a2, ...]  (denominator leading 1)
+                num_coeffs = coefficients[:numorder + 1]
+                den_tail   = coefficients[numorder + 1:]
+                den_coeffs = np.insert(den_tail, 0, 1.0)
 
-                # Ensure the denominator starts with 1 (common in transfer functions)
-                den_coefficients = np.insert(den_coefficients, 0, 1.0)
-
-                # Define the transfer function
-                sys_tf = ctrl.TransferFunction(num_coefficients, den_coefficients)
+                sys_tf = ctrl.TransferFunction(num_coeffs, den_coeffs)
+                # Simulate with same input/ time vectors used in curve_fit
                 _, yout = ctrl.forced_response(sys_tf, T=t, U=u)
                 return yout
 
-            # Step 4: Set initial guesses for the coefficients
+            # ---- 5) Initial guess and fit ----
             initial_guess = [1.0] * (numorder + 1 + denorder)
+            popt, _ = curve_fit(transfer_function_fit, time, y, p0=initial_guess, maxfev=5000)
 
-            # Step 5: Perform least-squares fitting
-            popt, _ = curve_fit(transfer_function_fit, time, y, p0=initial_guess)
-
-            # Extract numerator and denominator coefficients
+            # ---- 6) Build identified TF and show it ----
             num_fitted = popt[:numorder + 1]
-            den_fitted = np.insert(popt[numorder + 1:], 0, 1.0)  # Denominator starts with 1
-
-            # Step 6: Construct the identified transfer function
+            den_fitted = np.insert(popt[numorder + 1:], 0, 1.0)
             identified_system = ctrl.TransferFunction(num_fitted, den_fitted)
-            self.identificationresult.setText(f"Identified Transfer Function:\n{str(identified_system)}")
+            self.identificationresult.setText(f"Identified Transfer Function:\n{identified_system}")
 
-            # Optional: Plot the identified model's response
+            # ---- 7) Plot response vs measured ----
             _, y_identified = ctrl.forced_response(identified_system, T=time, U=u)
 
-            # Calculate the range of the system response
-            min_response = min(y_identified)
-            max_response = max(y_identified)
+            y_min = float(min(np.min(y_identified), np.min(y)))
+            y_max = float(max(np.max(y_identified), np.max(y)))
+            if y_max - y_min < 1e-6:
+                y_min, y_max = y_min - 1.0, y_max + 1.0
 
-            # Adjust the Y-axis of the graph to match the response range
-            self.graphWidgetforced_response.setYRange(min_response * 0.9, max_response * 1.1)
-
-            # Plot the system response
+            self.graphWidgetforced_response.setYRange(y_min * 0.95, y_max * 1.05)
             self.graphWidgetforced_response.plot(time, y_identified, pen='y', name="Identified Response")
-            self.graphWidgetforced_response.plot(time, y, pen='r', name="Measured Response")
+            self.graphWidgetforced_response.plot(time, y,           pen='r', name="Measured Response")
+
+            # --- Fit metrics ---
+            residuals = y - y_identified
+            N = len(y)
+            rmse = float(np.sqrt(np.mean(residuals**2)))
+            mae  = float(np.mean(np.abs(residuals)))
+            yvar = float(np.var(y))
+            r2   = float(1.0 - np.sum(residuals**2) / np.sum((y - np.mean(y))**2)) if N > 1 else float('nan')
+            nrmse = float(rmse / (np.sqrt(yvar) if yvar > 0 else 1.0))
+
+            self.rmse.setText(f"{rmse:.2f}")
+            self.mae.setText(f"{mae:.2f}")
+            self.r2.setText(f"{r2:.2f}")
+            self.nrmse.setText(f"{nrmse:.2f}")
+
+            # Append to the GUI text
+            #txt = self.identificationresult.toPlainText()
+            #txt += f"\nFit metrics:\n  RMSE = {rmse:.3g}\n  MAE = {mae:.3g}\n  R² = {r2:.3f}\n  NRMSE = {nrmse:.3f}"
+            #self.identificationresult.setText(txt)
+
+            # (Optional) residuals plot overlay
+            # self.graphWidgetforced_response.plot(time, residuals, pen='w', name='Residuals')
 
         except Exception as e:
             self.textBrowser.setText(f"Error during system identification: {e}")
 
+
     def update_graph(self):
         try:
-            # If there's no open serial port, skip quietly
             if self.serial_port is None or (hasattr(self.serial_port, "is_open") and not self.serial_port.is_open):
                 return
-            # --- Arduino Data Section ---
-            setpoint_rpm = None
-            measured_rpm = None
-            pwm_value = None
 
+            # Create file header once when saving is enabled
+            if self.saveValuesCheckBox.isChecked() and not getattr(self, "header_written", False):
+                from datetime import datetime
+                mode_text = self.modooperacion.currentText()
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                header = f"Mode: {mode_text}\nDate: {now}\nREF,MEAS,DT_ms,CURR,PWM\n"
+                with open('data.txt', 'w', newline='') as f:
+                    f.write(header)
+                self.header_written = True
+
+            # Read & process all available lines
             while self.serial_port.in_waiting:
-                serial_in = self.serial_port.readline(64).decode('utf-8', errors='ignore').strip()
-                self.serial_in.setText(serial_in)
+                line = self.serial_port.readline(128).decode('utf-8', errors='ignore').strip()
+                self.serial_in.setText(line)
 
                 try:
-                    values = list(map(float, serial_in.split()))
+                    vals = [float(x) for x in line.split()]
                 except ValueError:
-                    continue  # skip malformed line
-                if len(values) >= 3:
-                    setpoint_rpm = values[0]
-                    measured_rpm = values[1]
-                    pwm_value = values[-1]
+                    continue
+                if len(vals) < 5:
+                    continue
 
-                    self.dataRPM_setpoint.append(setpoint_rpm)
-                    self.dataRPM_measured.append(measured_rpm)
-                    self.dataPWM.append(pwm_value)
+                sp, meas, dt_ms, curr, pwm = vals[0], vals[1], vals[2], vals[3], vals[-1]
 
-                    max_rpm = max(max(self.dataRPM_setpoint, default=0), max(self.dataRPM_measured, default=0))
-                    max_pwm = max(self.dataPWM, default=0)
-                    self.graphWidgetRPM.setYRange(0, max(1, max_rpm) * 1.1)
-                    self.graphWidgetPWM.setYRange(0, max(1, max_pwm) * 1.1)
+                # Append to buffers (all with the same maxlen)
+                self.dataRPM_setpoint.append(sp)
+                self.dataRPM_measured.append(meas)
+                self.dataPWM.append(pwm)
+                self.dataDT.append(dt_ms)
 
-                    self.curve_setpoint.setData(self.dataRPM_setpoint)
-                    self.curve_measured.setData(self.dataRPM_measured)
-                    self.curve_pwm.setData(self.dataPWM)
+                # Save this sample if requested
+                if self.saveValuesCheckBox.isChecked():
+                    with open('data.txt', 'a', newline='') as f:
+                        f.write(f"{int(sp)},{int(meas)},{int(dt_ms)},{int(curr)},{int(pwm)}\n")
 
-            # --- Save to File Section ---
-            if self.saveValuesCheckBox.isChecked() and setpoint_rpm is not None:
-                if not self.header_written:
-                    mode_text = self.modooperacion.currentText()
-                    now = datetime.now()
-                    header = f"Modo: {mode_text}\nFecha: {now}\nReferencia, Medición, PWM\n"
-                    with open('datos.txt', 'w') as file:
-                        file.write(header)
-                    self.header_written = True
+            # ----- Plot latest window (equal-length slices) -----
+            N = min(len(self.dataDT), len(self.dataRPM_setpoint), len(self.dataRPM_measured), len(self.dataPWM))
+            if N == 0:
+                return
 
-                with open('datos.txt', 'a') as file:
-                    file.write(f"{int(setpoint_rpm)},{int(measured_rpm)},{int(pwm_value)}\n")
+            dt_s = np.asarray(self.dataDT, dtype=float)[-N:] * 1e-3
+            t = np.cumsum(dt_s); t -= t[0]
+
+            y_sp  = np.asarray(self.dataRPM_setpoint, dtype=float)[-N:]
+            y_mea = np.asarray(self.dataRPM_measured, dtype=float)[-N:]
+            y_pwm = np.asarray(self.dataPWM, dtype=float)[-N:]
+
+            self.curve_setpoint.setData(t, y_sp)
+            self.curve_measured.setData(t, y_mea)
+            self.curve_pwm.setData(t, y_pwm)
+
+            if "Position" in self.modooperacion.currentText():
+                ymin = float(min(y_sp.min(initial=0), y_mea.min(initial=0)))
+                ymax = float(max(y_sp.max(initial=0), y_mea.max(initial=0)))
+                self.graphWidgetRPM.setYRange(ymin*1.1, ymax*1.1)
+            else:
+                self.graphWidgetRPM.setYRange(0, max(1.0, float(max(y_sp.max(initial=0), y_mea.max(initial=0)))) * 1.1)
+            self.graphWidgetPWM.setYRange(0, max(1.0, float(y_pwm.max(initial=0))) * 1.1)
 
         except Exception as e:
-            print(f"Error: {e}")
-
+            print("update_graph error:", e)
 
     def ok_button_clicked(self):
         self.identificationresult.setText("Ok button pressed")
@@ -557,8 +698,8 @@ class MyDialog(QtWidgets.QDialog):
         StartStop=b'0'
         self.toggleupdate_parameters()
 
-    def SendData(self, StartStop, selected_mode, A, B, C, D, E, F, G, H,delay,tiemporeferencia,amplitudAuto,referenciaManual,offset,tiposenal,activetab,Kp,Ki,Kd,deadzone,time_constant,PIDtype):
-        data_string=f"{StartStop},{selected_mode},{A},{B},{C},{D},{E},{F},{G},{H},{delay},{tiemporeferencia},{amplitudAuto},{referenciaManual},{offset},{tiposenal},{activetab},{Kp},{Ki},{Kd},{deadzone},{time_constant},{PIDtype}"
+    def SendData(self, StartStop, selected_mode, A, B, C, D, E, F, G, H,delay,tiemporeferencia,amplitud,referenciaManual,offset,tiposenal,activetab,Kp,Ki,Kd,deadzone,time_constant,PIDtype,tiporef,reset_time):
+        data_string=f"{StartStop},{selected_mode},{A},{B},{C},{D},{E},{F},{G},{H},{delay},{tiemporeferencia},{amplitud},{referenciaManual},{offset},{tiposenal},{activetab},{Kp},{Ki},{Kd},{deadzone},{time_constant},{PIDtype},{tiporef},{reset_time}"
         data_bytes = data_string.encode('utf-8')
         self.serial_out.setText(str(data_bytes))
         data_bytes = (data_string + '\n').encode('utf-8')
@@ -575,10 +716,14 @@ class MyDialog(QtWidgets.QDialog):
         except ValueError:
             value = 0
         self.slider.setValue(value)
+        if self.manualinput.isChecked():
+            self.toggleupdate_parameters()
 
     def update_line_edit_from_slider(self):
         value = self.slider.value()
         self.reference.setText(str(value))
+        if self.manualinput.isChecked():
+            self.toggleupdate_parameters()
 
 
 def main():
