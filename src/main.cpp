@@ -514,7 +514,7 @@ void loop() {
         Serial.print(" ");
         Serial.print(int(sys.medicion));
         Serial.print(" ");
-        Serial.print(int(timing.TiempoCicloPromedio));
+        Serial.print(int(timing.tiempociclo));
         Serial.print(" ");
         Serial.println(ctrl.PWMOUT);
       #endif
