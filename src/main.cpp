@@ -498,13 +498,26 @@ void loop() {
           break;
         }
       }
-      meas.current = analogRead(A5);
-      Serial.printf("%d %d %d %d %d\n",
-                    (int)sys.referencia,
-                    (int)sys.medicion,
-                    (int)timing.tiempociclo,
-                    (int)meas.current,   // no usado aún en la GUI
-                    (int)ctrl.PWMOUT);
+
+      #ifdef USE_TEENSY
+        meas.current = analogRead(A5);
+        Serial.printf("%d %d %d %d %d\n",
+                      (int)sys.referencia,
+                      (int)sys.medicion,
+                      (int)timing.tiempociclo,
+                      (int)meas.current,   // no usado aún en la GUI
+                      (int)ctrl.PWMOUT);
+      #endif
+
+      #ifdef USE_ARDUINO
+        Serial.print(sys.referencia);
+        Serial.print(" ");
+        Serial.print(int(sys.medicion));
+        Serial.print(" ");
+        Serial.print(int(timing.TiempoCicloPromedio));
+        Serial.print(" ");
+        Serial.println(ctrl.PWMOUT);
+      #endif
     } 
     else {
       analogWrite(pins.pwmPin, 0);
