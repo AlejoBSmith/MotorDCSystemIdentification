@@ -510,11 +510,14 @@ void loop() {
       #endif
 
       #ifdef USE_ARDUINO
+        meas.current = analogRead(A5);
         Serial.print(sys.referencia);
         Serial.print(" ");
         Serial.print(int(sys.medicion));
         Serial.print(" ");
         Serial.print(int(timing.tiempociclo));
+        Serial.print(" ");
+        Serial.print((int)meas.current);
         Serial.print(" ");
         Serial.println(ctrl.PWMOUT);
       #endif
