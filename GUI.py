@@ -14,6 +14,17 @@ from PyQt6.QtWidgets import QDialogButtonBox, QButtonGroup, QMessageBox, QDialog
 from PyQt6.QtCore import QTimer
 from scipy.optimize import curve_fit
 from scipy.signal import cont2discrete
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QTextEdit, QWidget
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+import numpy as np
+import control as ctrl
 
 KNOWN_VIDPID = {
     (0x16C0, 0x0483),  # Teensy 4.x USB-Serial (PJRC)
@@ -32,6 +43,198 @@ def auto_find_port():
         if any(k in (p.description or "") for k in PREF_DESCR):
             return p.device
     return None
+
+class ControlPlotDialog(QDialog):
+    """
+    Root locus big window:
+      - Left: Root locus + Step response (stacked)
+      - Right: Text output (step_info, bandwidth, margins, selected K, etc.)
+      - Click on locus => updates BOTH info + step plot (coupled)
+      - Has minimize/maximize buttons
+    """
+
+    def __init__(self, parent, sys):
+        super().__init__(parent)
+        self.setWindowTitle("Root locus (large)")
+        self.resize(1200, 800)
+
+        # Enable minimize/maximize buttons (Windows often shows only X for QDialog)
+        flags = self.windowFlags()
+        self.setWindowFlags(
+            flags
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
+
+        self.sys = sys
+
+        # ---- Figure: 2 rows (RL on top, Step on bottom) ----
+        self.fig = Figure(constrained_layout=True)
+        self.ax_rl = self.fig.add_subplot(211)
+        self.ax_step = self.fig.add_subplot(212)
+        self.canvas = FigureCanvas(self.fig)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+
+        # ---- Right side info ----
+        self.info = QTextEdit()
+        self.info.setReadOnly(True)
+
+        # ---- Layout: left (toolbar+canvas) | right (info) ----
+        main = QHBoxLayout(self)
+
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addWidget(self.toolbar)
+        left_layout.addWidget(self.canvas)
+
+        main.addWidget(left, 3)       # stretch
+        main.addWidget(self.info, 2)  # stretch
+
+        # Root locus picking state
+        self._rlist = None
+        self._klist = None
+        self._hl_artist = None
+
+        # Initial plots
+        self._plot_root_locus_initial()
+        self._plot_step_for_K(K=0.0)  # default: K=0 => T=0 (flat)
+        self._set_info_idle()
+
+        # Connect click picking
+        self.canvas.mpl_connect("button_press_event", self._on_click_rlocus)
+
+    # ---------- Root locus ----------
+    def _plot_root_locus_initial(self):
+        self.ax_rl.clear()
+
+        # Precompute locus data for picking K
+        rlist, klist = ctrl.root_locus(self.sys, plot=False)
+        self._rlist, self._klist = rlist, klist
+
+        # Plot RL itself
+        # Using grid=False + sgrid() is the most reliable way to force the doc-style grid.
+        ctrl.root_locus_plot(self.sys, ax=self.ax_rl, grid=False)
+
+        self.ax_rl.relim()
+        self.ax_rl.autoscale_view()
+
+        # Force s-plane grid (damping ratio lines + wn arcs)
+        try:
+            ctrl.sgrid(ax=self.ax_rl)
+        except Exception:
+            # If sgrid isn't available in some versions, at least show a normal grid
+            self.ax_rl.grid(True, which="both")
+
+        # Remove titles/labels if you want max area (optional)
+        self.ax_rl.set_title("")
+        self.ax_rl.set_xlabel("")
+        self.ax_rl.set_ylabel("")
+
+        self.canvas.draw_idle()
+
+    def _on_click_rlocus(self, event):
+        # Only respond if click is inside RL axes
+        if event.inaxes != self.ax_rl:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        if self._rlist is None or self._klist is None:
+            return
+
+        z_click = event.xdata + 1j * event.ydata
+
+        # Find nearest locus point
+        diffs = np.abs(self._rlist - z_click)  # shape: (len(k), n_poles)
+        idx_flat = np.argmin(diffs)
+        ik, ip = np.unravel_index(idx_flat, diffs.shape)
+
+        K = float(self._klist[ik])
+        pole = self._rlist[ik, ip]
+
+        # Highlight selected pole on RL plot
+        if self._hl_artist is not None:
+            try:
+                self._hl_artist.remove()
+            except Exception:
+                pass
+        self._hl_artist = self.ax_rl.plot([pole.real], [pole.imag], marker="o", markersize=10)[0]
+        self.canvas.draw_idle()
+
+        # Update step plot + info (coupled!)
+        self._plot_step_for_K(K)
+        self._update_info_for_K(K, pole)
+
+    # ---------- Step response ----------
+    def _plot_step_for_K(self, K: float):
+        self.ax_step.clear()
+
+        # Closed-loop for this K with unity negative feedback
+        L = K * self.sys
+        T = ctrl.feedback(L, 1, sign=-1)
+
+        # Let python-control choose a reasonable time vector (usually OK)
+        try:
+            t, y = ctrl.step_response(T)
+            self.ax_step.plot(t, y)
+        except Exception as e:
+            self.ax_step.text(0.05, 0.5, f"step_response error: {e}", transform=self.ax_step.transAxes)
+
+        self.ax_step.grid(True, which="both")
+
+        # Remove titles/labels to save space (optional)
+        self.ax_step.set_title("")
+        self.ax_step.set_xlabel("")
+        self.ax_step.set_ylabel("")
+
+        self.canvas.draw_idle()
+
+    # ---------- Info panel ----------
+    def _set_info_idle(self):
+        self.info.setText(
+            "Root locus + step response\n\n"
+            "Click on the root locus to select a gain K.\n"
+            "The step response and parameters update instantly."
+        )
+
+    def _update_info_for_K(self, K: float, pole):
+        L = K * self.sys
+        T = ctrl.feedback(L, 1, sign=-1)
+
+        # step_info (python-control)
+        try:
+            si = ctrl.step_info(T)
+            step_txt = "\n".join([f"{k}: {si[k]}" for k in si])
+        except Exception as e:
+            step_txt = f"step_info error: {e}"
+
+        # -3 dB bandwidth (python-control)
+        try:
+            bw = ctrl.bandwidth(T)
+            bw_txt = f"{bw} rad/s"
+        except Exception as e:
+            bw_txt = f"bandwidth error: {e}"
+
+        # margins on open-loop (python-control)
+        try:
+            gm, pm, wg, wp = ctrl.margin(L)
+            margin_txt = (
+                f"gm: {gm}\n"
+                f"pm: {pm} deg\n"
+                f"w_g: {wg} rad/s\n"
+                f"w_p: {wp} rad/s"
+            )
+        except Exception as e:
+            margin_txt = f"margin error: {e}"
+
+        self.info.setText(
+            f"Selected point\n"
+            f"K = {K}\n"
+            f"Pole = {pole}\n\n"
+            f"Closed-loop step_info(T):\n{step_txt}\n\n"
+            f"Closed-loop bandwidth(T) (-3 dB): {bw_txt}\n\n"
+            f"Open-loop margins (L = K·G):\n{margin_txt}"
+        )
 
 class PortSelectDialog(QDialog):
     def __init__(self, initial_port=None, parent=None):
@@ -90,7 +293,7 @@ class PortSelectDialog(QDialog):
 class MyDialog(QtWidgets.QDialog):
     def __init__(self, port=None, parent=None):
         super(MyDialog, self).__init__(parent)
-        uic.loadUi('QtDesignerGUI.ui', self)  # load the UI first
+        uic.loadUi('QtDesignerGUI_upgraded.ui', self)  # load the UI first
         # ---- make the dialog look/behave like a normal resizable window ----
         flags = self.windowFlags()
         flags |= Qt.WindowType.WindowSystemMenuHint          # show system menu
@@ -176,6 +379,33 @@ class MyDialog(QtWidgets.QDialog):
         self.sim_den1.setPlaceholderText("s^1")
         self.sim_den0.setPlaceholderText("s^0")
 
+        self.cont_num3.setPlaceholderText("s^3")
+        self.cont_num2.setPlaceholderText("s^2")
+        self.cont_num1.setPlaceholderText("s^1")
+        self.cont_num0.setPlaceholderText("s^0")
+        self.plant_num3.setPlaceholderText("s^3")
+        self.plant_num2.setPlaceholderText("s^2")
+        self.plant_num1.setPlaceholderText("s^1")
+        self.plant_num0.setPlaceholderText("s^0")
+
+        self.cont_den3.setPlaceholderText("s^3")
+        self.cont_den2.setPlaceholderText("s^2")
+        self.cont_den1.setPlaceholderText("s^1")
+        self.cont_den0.setPlaceholderText("s^0")
+        self.plant_den3.setPlaceholderText("s^3")
+        self.plant_den2.setPlaceholderText("s^2")
+        self.plant_den1.setPlaceholderText("s^1")
+        self.plant_den0.setPlaceholderText("s^0")
+        
+        self.rlocus_num3.setPlaceholderText("s^3")
+        self.rlocus_num2.setPlaceholderText("s^2")
+        self.rlocus_num1.setPlaceholderText("s^1")
+        self.rlocus_num0.setPlaceholderText("s^0")
+        self.rlocus_den3.setPlaceholderText("s^3")
+        self.rlocus_den2.setPlaceholderText("s^2")
+        self.rlocus_den1.setPlaceholderText("s^1")
+        self.rlocus_den0.setPlaceholderText("s^0")
+
         self.datapoints.textChanged.connect(self.resize_deque)
         self.modooperacion.currentIndexChanged.connect(self.sendModeOperation)
         self.grupo_checkboxes = QButtonGroup(self)
@@ -206,6 +436,14 @@ class MyDialog(QtWidgets.QDialog):
         self.identify.clicked.connect(self.identify_system)
         # Define botón de simulación
         self.simulation.clicked.connect(self.Simulate)
+        # Define botón de cálculo tf equivalente
+        self.reduce.clicked.connect(self.reduceTF)
+        
+        self._setup_analysis_plots()
+        # Open big plots when user clicks the thumbnail plots
+        self.canvas_rl.mpl_connect("button_press_event", lambda e: self.open_big_rlocus())
+        self.canvas_step.mpl_connect("button_press_event", lambda e: self.open_big_step())
+        self.canvas_bode.mpl_connect("button_press_event", lambda e: self.open_big_bode())
 
         # Ensure the placeholder widget is inside a layout
         # El widget para la gráfica había que meterlo dentro de un recipiente (layout)
@@ -365,6 +603,162 @@ class MyDialog(QtWidgets.QDialog):
         except Exception as e:
             self.textBrowser.setText(f"Error in transfer function simulation: {e}")
 
+    def reduceTF(self):
+        def _f(le):
+            """Read float from QLineEdit; empty/invalid -> 0."""
+            try:
+                txt = le.text().strip()
+                return float(txt) if txt else 0.0
+            except Exception:
+                return 0.0
+
+        def _strip_leading_zeros(coefs, eps=1e-12):
+            c = list(map(float, coefs))
+            while len(c) > 1 and abs(c[0]) < eps:
+                c.pop(0)
+            return c
+
+        try:
+            # ---- Controller C(s) ----
+            c_num = [_f(self.cont_num3), _f(self.cont_num2), _f(self.cont_num1), _f(self.cont_num0)]
+            c_den = [_f(self.cont_den3), _f(self.cont_den2), _f(self.cont_den1), _f(self.cont_den0)]
+
+            # ---- Plant G(s) ----
+            g_num = [_f(self.plant_num3), _f(self.plant_num2), _f(self.plant_num1), _f(self.plant_num0)]
+            g_den = [_f(self.plant_den3), _f(self.plant_den2), _f(self.plant_den1), _f(self.plant_den0)]
+
+            # Clean leading zeros
+            c_num = _strip_leading_zeros(c_num)
+            c_den = _strip_leading_zeros(c_den)
+            g_num = _strip_leading_zeros(g_num)
+            g_den = _strip_leading_zeros(g_den)
+
+            # Basic sanity checks
+            if all(abs(x) < 1e-12 for x in c_den):
+                self.equivalent_tf.setText("Error: Controller denominator is all zeros.")
+                return
+            if all(abs(x) < 1e-12 for x in g_den):
+                self.equivalent_tf.setText("Error: Plant denominator is all zeros.")
+                return
+
+            C = ctrl.TransferFunction(c_num, c_den)
+            G = ctrl.TransferFunction(g_num, g_den)
+
+            # Series + negative unity feedback
+            L = ctrl.series(C, G)
+            T = ctrl.feedback(L, 1, sign=-1)  # negative feedback
+
+            # Pretty output (and also raw coefficient lists)
+            num = np.asarray(T.num[0][0], dtype=float)
+            den = np.asarray(T.den[0][0], dtype=float)
+
+            out = []
+            out.append("Series reduction:")
+            out.append(self.tf_to_pretty_str(L))
+            out.append("\nEquivalent system:")
+            out.append(self.tf_to_pretty_str(T))
+            self.equivalent_tf.setText("\n".join(out))
+
+
+        except Exception as e:
+            self.equivalent_tf.setText(f"Error reducing block diagram: {e}")
+
+    def tf_to_pretty_str(self, sys, var='s', digits=6, eps=1e-12):
+                """Return only the transfer function fraction (no sys[..], no I/O labels)."""
+                # SISO assumed
+                num = np.asarray(sys.num[0][0], dtype=float)
+                den = np.asarray(sys.den[0][0], dtype=float)
+
+                # trim tiny coeffs
+                num[np.abs(num) < eps] = 0.0
+                den[np.abs(den) < eps] = 0.0
+
+                def poly_str(c):
+                    # c is descending powers
+                    n = len(c) - 1
+                    terms = []
+                    for i, a in enumerate(c):
+                        p = n - i
+                        if abs(a) < eps:
+                            continue
+                        a_str = f"{a:.{digits}g}"
+
+                        if p == 0:
+                            terms.append(f"{a_str}")
+                        elif p == 1:
+                            if abs(a - 1.0) < eps:   terms.append(f"{var}")
+                            elif abs(a + 1.0) < eps: terms.append(f"-{var}")
+                            else:                    terms.append(f"{a_str} {var}")
+                        else:
+                            if abs(a - 1.0) < eps:   terms.append(f"{var}^{p}")
+                            elif abs(a + 1.0) < eps: terms.append(f"-{var}^{p}")
+                            else:                    terms.append(f"{a_str} {var}^{p}")
+
+                    if not terms:
+                        return "0"
+                    s = " + ".join(terms)
+                    return s.replace("+ -", "- ")
+
+                num_s = poly_str(num)
+                den_s = poly_str(den)
+
+                # simple fraction formatting
+                bar = "-" * max(len(num_s), len(den_s), 12)
+                return f"{num_s}\n{bar}\n{den_s}"
+
+    def _read_tf_from_rlocus_inputs(self):
+        def _f(le):
+            try:
+                t = le.text().strip()
+                return float(t) if t else 0.0
+            except Exception:
+                return 0.0
+
+        def _strip_leading_zeros(coefs, eps=1e-12):
+            c = list(map(float, coefs))
+            while len(c) > 1 and abs(c[0]) < eps:
+                c.pop(0)
+            return c
+
+        num = [_f(self.rlocus_num3), _f(self.rlocus_num2), _f(self.rlocus_num1), _f(self.rlocus_num0)]
+        den = [_f(self.rlocus_den3), _f(self.rlocus_den2), _f(self.rlocus_den1), _f(self.rlocus_den0)]
+
+        num = _strip_leading_zeros(num)
+        den = _strip_leading_zeros(den)
+
+        if all(abs(x) < 1e-12 for x in den):
+            raise ValueError("Denominator is all zeros.")
+
+        return ctrl.TransferFunction(num, den)
+    
+    def _strip_titles_labels(self, ax, keep_x=False, keep_y=False):
+        ax.set_title("")
+        if not keep_x:
+            ax.set_xlabel("")
+        if not keep_y:
+            ax.set_ylabel("")
+
+    def _get_current_analysis_sys(self):
+        # Use the same transfer function you already read for rlocus inputs
+        return self._read_tf_from_rlocus_inputs()
+
+    def open_big_rlocus(self):
+        sys = self._read_tf_from_rlocus_inputs()
+        dlg = ControlPlotDialog(self, sys)
+        dlg.exec()
+
+
+    def open_big_step(self):
+        sys = self._get_current_analysis_sys()
+        dlg = ControlPlotDialog(self, "Step response (large)", "step", sys)
+        dlg.exec()
+
+    def open_big_bode(self):
+        sys = self._get_current_analysis_sys()
+        dlg = ControlPlotDialog(self, "Bode plot (large)", "bode", sys)
+        dlg.exec()
+
+
     def discretize_function(self):
 
         def _strip_leading_zeros(coefs, eps=1e-12):
@@ -421,9 +815,26 @@ class MyDialog(QtWidgets.QDialog):
             # Pretty string in z^-1 form
             num_str = _poly_to_zinv_str(num_z)
             den_str = _poly_to_zinv_str(den_z)
-            result  = f"H(z) = ({num_str}) / ({den_str}),  Ts = {T_s:g} s"
 
-            self.discretizationresult.setText(result)
+            # --- pretty fraction formatting (same style as tf_to_pretty_str) ---
+            num_s = f"({num_str})"
+            den_s = f"({den_str})"
+            bar = "-" * max(len(num_s), len(den_s), 12)
+
+            result = (
+                "H(z) =\n"
+                f"{num_s}\n"
+                f"{bar}\n"
+                f"{den_s}\n"
+                f"Ts = {T_s:g} s"
+            )
+
+            # Use plain text if available (keeps line breaks reliably)
+            if hasattr(self.discretizationresult, "setPlainText"):
+                self.discretizationresult.setPlainText(result)
+            else:
+                self.discretizationresult.setText(result)
+
 
         except Exception as e:
             self.discretizationresult.setText(f"Error: {e}")
@@ -434,6 +845,182 @@ class MyDialog(QtWidgets.QDialog):
         self.dataRPM_measured = deque(list(self.dataRPM_measured)[-datapoints:], maxlen=datapoints)
         self.dataPWM = deque(list(self.dataPWM)[-datapoints:], maxlen=datapoints)
         self.dataDT = deque(list(self.dataDT)[-datapoints:], maxlen=datapoints)
+
+    def _read_float(self, le):
+        """Read float from QLineEdit. Empty/invalid -> 0."""
+        try:
+            txt = le.text().strip()
+            return float(txt) if txt else 0.0
+        except Exception:
+            return 0.0
+
+
+    def _strip_leading_zeros(self, coefs, eps=1e-12):
+        c = [float(x) for x in coefs]
+        while len(c) > 1 and abs(c[0]) < eps:
+            c.pop(0)
+        return c
+
+
+    def _read_tf_from_rlocus_inputs(self):
+        # NOTE: adjust if you only have num2..num0 (remove the *_3 entries)
+        num = [
+            self._read_float(self.rlocus_num3),
+            self._read_float(self.rlocus_num2),
+            self._read_float(self.rlocus_num1),
+            self._read_float(self.rlocus_num0),
+        ]
+        den = [
+            self._read_float(self.rlocus_den3),
+            self._read_float(self.rlocus_den2),
+            self._read_float(self.rlocus_den1),
+            self._read_float(self.rlocus_den0),
+        ]
+
+        num = self._strip_leading_zeros(num)
+        den = self._strip_leading_zeros(den)
+
+        if all(abs(x) < 1e-12 for x in den):
+            raise ValueError("Denominator is all zeros.")
+
+        return ctrl.TransferFunction(num, den)
+
+    def _setup_analysis_plots(self):
+        """
+        Replace your placeholder QWidgets:
+        - self.rlocus
+        - self.bode_plot
+        - self.time_response
+        with Matplotlib canvases.
+        """
+        # ---------- Root locus canvas ----------
+        fig_rl = Figure(figsize=(4, 3), tight_layout=True)
+        self.canvas_rl = FigureCanvas(fig_rl)
+        self.ax_rl = fig_rl.add_subplot(111)
+
+        # ---------- Bode canvas (2 axes: mag + phase) ----------
+        fig_bode = Figure(figsize=(4, 3), tight_layout=True)
+        self.canvas_bode = FigureCanvas(fig_bode)
+        self.ax_mag = fig_bode.add_subplot(211)
+        self.ax_phase = fig_bode.add_subplot(212)
+
+        # ---------- Time response canvas ----------
+        fig_step = Figure(figsize=(4, 3), tight_layout=True)
+        self.canvas_step = FigureCanvas(fig_step)
+        self.ax_step = fig_step.add_subplot(111)
+
+        # Helper to replace a placeholder widget that sits inside a layout
+        def _replace_in_parent_layout(placeholder_widget, new_widget):
+            parent = placeholder_widget.parentWidget()
+            if parent is None or parent.layout() is None:
+                raise RuntimeError(
+                    f"Placeholder '{placeholder_widget.objectName()}' has no parent layout. "
+                    "In Designer, put it inside a layout (e.g., QVBoxLayout)."
+                )
+            parent.layout().replaceWidget(placeholder_widget, new_widget)
+            placeholder_widget.setParent(None)
+            placeholder_widget.deleteLater()
+
+        _replace_in_parent_layout(self.rlocus, self.canvas_rl)
+        _replace_in_parent_layout(self.bode_plot, self.canvas_bode)
+        _replace_in_parent_layout(self.time_response, self.canvas_step)
+
+        # Debounce plot updates (so it doesn't redraw on every keystroke instantly)
+        self._analysis_timer = QTimer(self)
+        self._analysis_timer.setSingleShot(True)
+        self._analysis_timer.timeout.connect(self.update_analysis_plots)
+
+        def _schedule():
+            self._analysis_timer.start(200)
+
+        # Update plots when any coefficient changes
+        for le in (
+            self.rlocus_num3, self.rlocus_num2, self.rlocus_num1, self.rlocus_num0,
+            self.rlocus_den3, self.rlocus_den2, self.rlocus_den1, self.rlocus_den0,
+        ):
+            le.textChanged.connect(_schedule)
+
+        # Optional: draw once at startup (will likely show blank/default until numbers are entered)
+        self.update_analysis_plots()
+
+    def update_analysis_plots(self):
+        try:
+            sys = self._read_tf_from_rlocus_inputs()
+
+            # ============ Root locus ============
+            self.ax_rl.clear()
+
+            # grid=True  -> damping ratio & wn arcs (the docs look you want)
+            # grid=False -> only axes
+            # grid='empty' -> only the locus lines (no axes/grid)
+            ctrl.root_locus_plot(sys, ax=self.ax_rl, grid=True)
+
+            # ============ Bode ============
+            self.ax_mag.clear()
+            self.ax_phase.clear()
+
+            omega = np.logspace(-2, 3, 600)
+            ctrl.bode_plot(
+                sys,
+                omega=omega,
+                ax=[self.ax_mag, self.ax_phase],
+                dB=True,
+                deg=True,
+                Hz=False,
+                grid=True
+            )
+
+            # Hide x tick labels on the TOP (magnitude) plot to save space
+            self.ax_mag.tick_params(axis='x', which='both', labelbottom=False)
+
+            # ============ Step response ============
+            self.ax_step.clear()
+            t = np.linspace(0, 5, 800)
+            t, y = ctrl.step_response(sys, T=t)
+            self.ax_step.plot(t, y)
+            self.ax_step.grid(True)
+
+            # Draw
+            self.canvas_rl.draw_idle()
+            self.canvas_bode.draw_idle()
+            self.canvas_step.draw_idle()
+
+            # ============ Bode ============
+            self.ax_mag.clear()
+            self.ax_phase.clear()
+
+            omega = np.logspace(-2, 3, 600)
+            ctrl.bode_plot(sys, omega=omega, ax=[self.ax_mag, self.ax_phase],
+                        dB=True, deg=True, Hz=False, grid=True)
+
+            # ============ Step response ============
+            self.ax_step.clear()
+            t = np.linspace(0, 5, 800)
+            t, y = ctrl.step_response(sys, T=t)
+            self.ax_step.plot(t, y)
+            self.ax_step.grid(True)
+
+            # ============ Root locus ============
+            self.ax_rl.clear()
+            ctrl.root_locus_plot(sys, ax=self.ax_rl, grid=True)
+
+            # remove title + axis labels
+            self._strip_titles_labels(self.ax_rl, keep_x=False, keep_y=False)
+            self._strip_titles_labels(self.ax_mag, keep_x=False, keep_y=False)
+            self._strip_titles_labels(self.ax_phase, keep_x=False, keep_y=False)
+            self._strip_titles_labels(self.ax_step, keep_x=False, keep_y=False)
+
+
+            # Clear any GUI error label if you have one
+            if hasattr(self, "plot_error"):
+                self.plot_error.setText("")
+
+        except Exception as e:
+            if hasattr(self, "plot_error"):
+                self.plot_error.setText(f"Plot error: {e}")
+            else:
+                print("Plot error:", e)
+
 
     def sendModeOperation(self):
         selected_text = self.modooperacion.currentText()
@@ -648,7 +1235,7 @@ class MyDialog(QtWidgets.QDialog):
                 # Save this sample if requested
                 if self.saveValuesCheckBox.isChecked():
                     with open('data.txt', 'a', newline='') as f:
-                        f.write(f"{int(sp)},{int(meas)},{int(dt_ms)},{int(curr)},{int(pwm)}\n")
+                        f.write(f"{int(sp)},{int(meas)},{int(dt_ms)},{curr:.2f},{int(pwm)}\n")
 
             # ----- Plot latest window (equal-length slices) -----
             N = min(len(self.dataDT), len(self.dataRPM_setpoint), len(self.dataRPM_measured), len(self.dataPWM))

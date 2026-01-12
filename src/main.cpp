@@ -1,5 +1,6 @@
 #include <Arduino.h>
-#include <movingAvg.h>
+#include "MovingAvgF.h"
+#include "MovingMedianF.h"
 #include <math.h>
 
 // ====================================
@@ -67,8 +68,8 @@ struct SystemVariables {
   int amplitudAuto = 0;
   int offset = 0;
   int referenciaManual = 0;
-  int pwmMinimoLinealidad = 80;
-  int pwmMaximoLinealidad = 200;
+  int pwmMinimoLinealidad = 40;
+  int pwmMaximoLinealidad = 240;
   int deg = 0;
 };
 
@@ -97,7 +98,10 @@ struct SerialData {
 struct MeasurementsData {
   float RPM = 0;
   float RPMPromedio = 0;
-  int current = 0;
+  float current = 0;
+  float currentMedian = 0;
+  float currentAvgAux = 0;
+  float currentAvg = 0;
 };
 
 MotorPins pins;
@@ -109,7 +113,11 @@ SerialData serialData;
 MeasurementsData meas;
 
 int avgwindowsize = 1;
-movingAvg RPMAvg(avgwindowsize);
+int currentwindowsize = 4; //la medición de corriente es particularmente ruidosa
+MovingAvgF RPMAvg(avgwindowsize);
+MovingMedianF FilteredCurrentMedian(avgwindowsize); //Moving median
+MovingAvgF FilteredCurrent(currentwindowsize);  // 1st order avg filter
+MovingAvgF FilteredCurrent2(currentwindowsize); // 2nd order avg filter
 
 void divideString(String DatoSerial, char delimitador, String salida[], int limite) {
   int posicion = 0;
@@ -139,6 +147,8 @@ void inicializaVariables() {
   ctrl.integral_sum = 0.0f; // por si acaso
 
   RPMAvg.reset();
+  FilteredCurrent.reset();
+  FilteredCurrent2.reset();
 }
 
 void updateEncoder() {
@@ -350,6 +360,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(pins.encoderB), updateEncoder, CHANGE);
   Serial.begin(115200);
   RPMAvg.begin();
+  FilteredCurrent.begin();
+  FilteredCurrent2.begin();
   randomSeed(analogRead(2));
 }
 
@@ -424,7 +436,7 @@ void loop() {
 
           ctrl.error = sys.referencia - meas.RPMPromedio;
 
-          if (sys.tab_activo == 2){
+          if (sys.tab_activo == 4){
             switch (ctrl.PIDtype) {
               case 0:  ctrl.controladorOUT = PID_incremental();       break;
               case 1:  ctrl.controladorOUT = PID_positional_Tustin(); break;
@@ -439,7 +451,7 @@ void loop() {
               ctrl.PWMOUT         = 0;
             }
           }
-          else if (sys.tab_activo == 4){
+          else if (sys.tab_activo == 6){
             ctrl.controladorOUT = EcuacionDiferencias();
             if (sys.referencia != 0){
               ctrl.PWMOUT = ctrl.controladorOUT + ctrl.ZM;
@@ -463,12 +475,12 @@ void loop() {
           if (timing.tiempociclo < 1) timing.tiempociclo = timing.delayintencional;
 
           float u = 0;
-          if (sys.tab_activo == 2) {
+          if (sys.tab_activo == 4) {
             switch (ctrl.PIDtype) {
               case 0: u = PID_incremental();       break;
               case 1: u = PID_positional_Tustin(); break;
             }
-          } else if (sys.tab_activo == 4) {
+          } else if (sys.tab_activo == 6) {
             u = EcuacionDiferencias();
           }
           u = constrain(u, -255, 255);
@@ -500,12 +512,16 @@ void loop() {
       }
 
       #ifdef USE_TEENSY
-        meas.current = analogRead(A5);
-        Serial.printf("%d %d %d %d %d\n",
+        meas.current = 1.26*analogRead(A5)+2.643; // ecuación de calibración
+        meas.current = constrain(meas.current,0.0f,2000.0f);
+        meas.currentMedian = FilteredCurrentMedian.reading(meas.current);
+        meas.currentAvgAux = FilteredCurrent.reading(meas.currentMedian);
+        meas.currentAvg = FilteredCurrent2.reading(meas.currentAvgAux);
+        Serial.printf("%d %d %d %.2f %d\n",
                       (int)sys.referencia,
                       (int)sys.medicion,
                       (int)timing.tiempociclo,
-                      (int)meas.current,   // no usado aún en la GUI
+                      (float)meas.currentAvg,   // no usado aún en la GUI
                       (int)ctrl.PWMOUT);
       #endif
 
