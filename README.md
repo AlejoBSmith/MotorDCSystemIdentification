@@ -1,3 +1,5 @@
+![Open Source Hardware Facts](docs/oshwa-facts.svg)
+
 # Identificación de sistema para motor DC
 Este repositorio es para alojar el código de base para el curso de Teoría de Control II.
 En él hay dos archivos principales:
