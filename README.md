@@ -1,16 +1,48 @@
 ![Open Source Hardware Facts](oshw_facts.svg)
 
-# Identificación de sistema para motor DC
-Este repositorio es para alojar el código de base para el curso de Teoría de Control II.
-En él hay dos archivos principales:
+# OpenMCT – DC Motor Control Trainer (Teoría de Control I/II)
 
-## DC_Motor/src/main.cpp
-Código de Arduino para control de motor DC. El código es para uso con un L298N. Deben verificar los pines, que deben estar de acuerdo a lo que dice el código.
+Este repositorio contiene el código y la GUI del kit OpenMCT para control con un motor DC: adquisición de datos, excitación, identificación de sistema y pruebas en lazo cerrado (PID y controladores en forma de ecuación en diferencias).
 
-## DC_Motor/GuardaDatos.py
-Código para guardar en un archivo de texto los datos de salida del Arduino. Este archivo es necesario para generar la data que se usará para la identificación de sistema.
+## Archivos del repositorio
 
-## Carpeta Ejemplos
-Se incluyen ejemplos del proceso completo de diseño e implementación del controlador. En los datos se encuentra el MotorDC.mat que contiene los datos obtenidos para el system identification. Con estos datos se identifica la planta y se muestra cuál es la TF escogida. Luego se diseñan dos controladores (se incluye captura del sistema en el control system designer) y se verifica su comportamiento (con mediciones reales) respecto a la simulación.
+### Firmware (Teensy / PlatformIO)
+- **`src/main.cpp`**  
+  Firmware para el microcontrolador (Teensy 4.x). Implementa:
+  - lectura de encoder (posición/velocidad)
+  - salida PWM al driver
+  - medición de corriente (solo funciona si se usa el del kit con el DRV8874)
+  - streaming por serial para visualización/registro
+  - ejecución del controlador (PID y/o coeficientes en z)
 
-En el archivo DatosMotorDC.mat se encuentran todos los datos para la realización del proceso completo para llegar a los mismos resultados. Estos datos pueden usarse para realizar el proceso de diseño y simulación. Nótese que las ecuaciones de identificación de sistema y del controlador solo son válidas para el sistema que generó los datos y puede que para su sistema de motro dc no funcione igual (o no funcione para absolutamente nada).
+- **`platformio.ini`**  
+  Configuración del proyecto en PlatformIO (VS Code).
+
+> **Importante**: La GUI se puede usar con otros controladores pero debe hacer la modificación de los pines en el main.cpp. Si no, no servirá.
+
+### GUI (Python/Qt)
+- **`GUI.py`**  
+  Aplicación de escritorio para:
+  - conectar por serial
+  - ver gráficas de las señales
+  - generar señales de excitación
+  - registrar datos
+  - ajustar/controlar parámetros (PID y coeficientes)
+- **`QtDesignerGUI*.ui`**  
+  Base de la interfaz hecha en Qt Designer.
+
+---
+
+## Requisitos
+
+### Firmware
+- VS Code + PlatformIO
+- Teensy 4.x (o el target que tengas configurado)
+- Driver + encoder conectados como dice el código
+
+### GUI
+Python 3.10+ recomendado.
+
+Para instalar los paquetes para la interfaz, abre un powershell y corre:
+> pip install PyQt6 pyqtgraph pyserial numpy pandas control scipy matplotlib
+
